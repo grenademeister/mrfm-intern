@@ -133,23 +133,8 @@ class DataWrapper(Dataset):
         tgt = resize_512(interpolate_to_target_width(tgt, target_size=512))
 
         input = img.clone()
-        input, _, _ = apply_fixed_mask(input, acs_num=self.acs_num, parallel_factor=self.parallel_factor)
+        # input, _, _ = apply_fixed_mask(input, acs_num=self.acs_num, parallel_factor=self.parallel_factor)
         input = input.abs().to(torch.float32)
-
-        def _normalize_per_sample(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-            # Normalize each sample to zero mean / unit std to stabilize loss scale.
-            if x.dim() == 3:
-                dims = (1, 2)
-            elif x.dim() == 4:
-                dims = (1, 2, 3)
-            else:
-                raise ValueError(f"Expected 3D or 4D tensor, got {x.dim()}D.")
-            mean = x.mean(dim=dims, keepdim=True)
-            std = x.std(dim=dims, keepdim=True).clamp_min(eps)
-            return (x - mean) / std
-
-        input = _normalize_per_sample(input)
-        tgt = _normalize_per_sample(tgt)
 
         text = loadmat(self.file_list[idx])["text"][0][0]
         text = _coerce_matlab_text(text)

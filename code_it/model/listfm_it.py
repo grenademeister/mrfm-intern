@@ -126,17 +126,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             instruction=instruction,
         )
 
-        return self._normalize_per_sample(img_decode)
-
-    @staticmethod
-    def _normalize_per_sample(
-        x: Tensor,
-        eps: float = 1e-6,
-    ) -> Tensor:
-        # Per-sample normalization to stabilize output scale.
-        mean = x.mean(dim=(1, 2, 3), keepdim=True)
-        std = x.std(dim=(1, 2, 3), keepdim=True).clamp_min(eps)
-        return (x - mean) / std
+        return img_decode
 
 
 def load_from_ckpt(

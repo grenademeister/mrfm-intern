@@ -33,6 +33,7 @@ def pad_square(
 def interpolate_to_target_width(
     img: Tensor,
     target_size: int,
+    mode: str = "bilinear",
 ) -> Tensor:
     img_dims = img.dim()
     if img_dims not in {4, 3}:
@@ -46,15 +47,15 @@ def interpolate_to_target_width(
         img = torch.nn.functional.interpolate(
             img,
             size=(target_size, int(w * target_size / h)),
-            mode="bilinear",
-            align_corners=False,
+            mode=mode,
+            align_corners=False if mode in {"bilinear", "bicubic"} else None,
         )
     else:
         img = torch.nn.functional.interpolate(
             img,
             size=(int(h * target_size / w), target_size),
-            mode="bilinear",
-            align_corners=False,
+            mode=mode,
+            align_corners=False if mode in {"bilinear", "bicubic"} else None,
         )
 
     if img_dims == 3:
@@ -105,6 +106,7 @@ def pad_for_min_size(
 
 def resize_512(
     img: Tensor,
+    mode: str = "bilinear",
 ) -> Tensor:
     img_dims = img.dim()
     if img_dims not in {4, 3}:
@@ -120,7 +122,7 @@ def resize_512(
         return img
 
     if h > 512 or w > 512:
-        img = interpolate_to_target_width(img, target_size=512)
+        img = interpolate_to_target_width(img, target_size=512, mode=mode)
 
     img = pad_square(img, target_size=512)
 
