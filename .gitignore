@@ -1,0 +1,68 @@
+# Ignore everything by default; allow only selected directories.
+*
+!.gitignore
+!code_it/
+!code_it/**
+!data_prep/
+!data_prep/**
+
+# Logs and temp files
+**/*.log
+**/logs/
+**/*.tmp
+**/*.temp
+**/*.swp
+**/*.swo
+**/*.bak
+**/*~
+
+# OS/editor junk
+**/.DS_Store
+**/Thumbs.db
+**/.idea/
+**/.vscode/
+
+# Python/build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/build/
+**/dist/
+**/*.egg-info/
+
+# Virtual environments
+**/.venv/
+**/venv/
+**/env/
+
+# Common large/binary artifacts
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.7z
+**/*.rar
+**/*.bin
+**/*.pt
+**/*.pth
+**/*.ckpt
+**/*.onnx
+**/*.h5
+**/*.npy
+**/*.npz
+**/*.pkl
+**/*.joblib
+**/*.parquet
+**/*.feather
+
+# Experiment outputs
+**/runs/
+**/wandb/
+**/mlruns/
+**/checkpoints/
+**/outputs/
