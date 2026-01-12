@@ -74,9 +74,8 @@ def load_grouped_data(root_path):
     root = Path(root_path)
     source_nii_list = sorted(root.glob("*.nii.gz"))
     print(f"Found {len(source_nii_list)} nii.gz files")
-    
+
     grouped_data = defaultdict(lambda: defaultdict(list))
-    
     for file_path in source_nii_list:
         filename = file_path.name
         if "echo-" in filename:
