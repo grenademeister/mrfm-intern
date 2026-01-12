@@ -27,7 +27,8 @@ echo "[INFO] Current directory: $(pwd)"
 #   fi
 # done
 
-export DATA_ROOT="/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat,
+                  /fast_storage/intern/data/instruction_tuning/brats_segmentation_mat"
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
 GPU="0,1,2,3,4,5,6,7"

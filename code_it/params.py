@@ -31,7 +31,7 @@ class GeneralConfig:
     # Optimizer
     optimizer: Literal["adam", "adamw"] = "adam"
     loss_model: Literal["l1", "l2"] = "l2"
-    lr: float = 1e-4
+    lr: float = 2e-4
     lr_decay: float = 0.88
     lr_tol: int = 1
 
@@ -41,18 +41,18 @@ class GeneralConfig:
     valid_batch: int = 16
     train_epoch: int = 40
     logging_density: int = 8
-    valid_interval: int = 2
-    valid_tol: int = 1
+    valid_interval: int = 4
+    valid_tol: int = 4
     num_workers: int = 32
     save_val: bool = True
     parallel: bool = True
     device: torch.device | None = None
-    save_max_idx: int = 500
+    save_max_idx: int = 100
 
     # Pretrained
     pretrained: str = "/home/juhyung/code/fm2026/code_downstream_recon/checkpoint_v2.1.ckpt"
     use_bottleneck: bool = True
-    grad_encoder: bool = True
+    grad_encoder: bool = False
     from_scratch: bool = False
 
     # Data params
