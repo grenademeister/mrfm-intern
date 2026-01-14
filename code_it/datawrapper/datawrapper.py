@@ -75,12 +75,17 @@ class DataWrapper(Dataset):
         subject_num: int,
         train_percent: float,
         slice_per_subject: int,
+        split: str,
     ):
         super().__init__()
 
         total_list: list[str] = []
         for _file_path in file_path:
-            total_list += glob.glob(f"{_file_path}/{data_type}")
+            files = glob.glob(f"{_file_path}/{data_type}")
+            if split == "train":
+                total_list += files[:5000]
+            else:
+                total_list += files[:500]
 
         self.file_list = total_list
         self.training_mode = training_mode
@@ -160,6 +165,7 @@ def get_data_wrapper_loader(
     file_path: list[str],
     training_mode: bool,
     loader_cfg: LoaderConfig,
+    split: str,
 ) -> tuple[
     DataLoader,
     DataWrapper,
@@ -175,6 +181,7 @@ def get_data_wrapper_loader(
         subject_num=loader_cfg.subject_num,
         train_percent=loader_cfg.train_percent,
         slice_per_subject=loader_cfg.slice_per_subject,
+        split=split,
     )
 
     _ = dataset[0]

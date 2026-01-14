@@ -31,8 +31,8 @@ class GeneralConfig:
     # Optimizer
     optimizer: Literal["adam", "adamw"] = "adam"
     loss_model: Literal["l1", "l2"] = "l2"
-    lr: float = 2e-4
-    lr_decay: float = 0.88
+    lr: float = 1e-3
+    lr_decay: float = 0.90
     lr_tol: int = 1
 
     # Train params
@@ -42,7 +42,7 @@ class GeneralConfig:
     train_epoch: int = 40
     logging_density: int = 8
     valid_interval: int = 4
-    valid_tol: int = 4
+    valid_tol: int = 2
     num_workers: int = 32
     save_val: bool = True
     parallel: bool = True
@@ -52,7 +52,7 @@ class GeneralConfig:
     # Pretrained
     pretrained: str = "/home/juhyung/code/fm2026/code_downstream_recon/checkpoint_v2.1.ckpt"
     use_bottleneck: bool = True
-    grad_encoder: bool = False
+    grad_encoder: bool = True
     from_scratch: bool = False
 
     # Data params

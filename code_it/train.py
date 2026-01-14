@@ -113,7 +113,7 @@ class Trainer:
         valid_loader_cfg = LoaderConfig(
             batch=config.valid_batch,
             num_workers=config.num_workers,
-            shuffle=False,
+            shuffle=True,
             debug_mode=config.debugmode,
             acs_num=config.acs_num,
             parallel_factor=config.parallel_factor,
@@ -126,7 +126,7 @@ class Trainer:
         test_loader_cfg = LoaderConfig(
             batch=config.valid_batch,
             num_workers=config.num_workers,
-            shuffle=False,
+            shuffle=True,
             debug_mode=config.debugmode,
             acs_num=config.acs_num,
             parallel_factor=config.parallel_factor,
@@ -140,6 +140,7 @@ class Trainer:
             file_path=config.train_dataset,
             training_mode=True,
             loader_cfg=train_loader_cfg,
+            split="train",
         )
         logger.info(f"Train dataset length : {self.train_len}")
 
@@ -147,6 +148,7 @@ class Trainer:
             file_path=config.valid_dataset,
             training_mode=False,
             loader_cfg=valid_loader_cfg,
+            split="valid",
         )
         logger.info(f"Valid dataset length : {valid_len}")
 
@@ -154,6 +156,7 @@ class Trainer:
             file_path=config.test_dataset,
             training_mode=False,
             loader_cfg=test_loader_cfg,
+            split="test",
         )
         logger.info(f"Test dataset length : {test_len}")
 

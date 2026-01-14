@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -58,9 +59,10 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
         validate_tensor_dimensions([img], 4)
         validate_tensor_channels(img, self.listfmconfig.img_in_chan)
 
+        text_ctx = torch.no_grad() if not grad_encoder else nullcontext()
         text_full_feature = None
         if instruction is None:
-            with torch.no_grad():
+            with text_ctx:
                 (
                     _text_features,
                     text_full_feature,
@@ -75,7 +77,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             torch.int64,
             torch.uint8,
         }:
-            with torch.no_grad():
+            with text_ctx:
                 (
                     _instruction_features,
                     instruction_full_feature,
@@ -105,7 +107,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
 
         if use_bottleneck:
             if text_full_feature is None:
-                with torch.no_grad():
+                with text_ctx:
                     (
                         _text_features,
                         text_full_feature,
