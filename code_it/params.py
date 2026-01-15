@@ -7,7 +7,7 @@ from typing import Literal
 import torch
 from params_data import TEST_DATASET, TRAIN_DATASET, VALID_DATASET
 
-default_run_dir: str = "/home/intern2/fm2026/code_intern/logs"
+default_run_dir: str = "/home/intern2/fm2026/fm_flow/logs"
 RUN_DIR: str = os.environ.get("RUN_DIR", default_run_dir)
 
 
@@ -42,7 +42,7 @@ class GeneralConfig:
     train_epoch: int = 40
     logging_density: int = 8
     valid_interval: int = 4
-    valid_tol: int = 2
+    valid_tol: int = 10
     num_workers: int = 32
     save_val: bool = True
     parallel: bool = True
@@ -54,6 +54,14 @@ class GeneralConfig:
     use_bottleneck: bool = True
     grad_encoder: bool = True
     from_scratch: bool = False
+
+    # Rectified flow
+    flow_t_min: float = 0.0
+    flow_t_max: float = 1.0
+    flow_eval_t: float = 0.9
+    flow_noise_std: float = 1.0
+    flow_eval_steps: int = 10
+    flow_eval_eps: float = 1e-4
 
     # Data params
     acs_num: int = 24

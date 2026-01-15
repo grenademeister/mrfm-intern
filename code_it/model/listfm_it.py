@@ -41,10 +41,12 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             self.vision_decoder = VisionTextDecoder(
                 out_chans=listfmconfig.img_in_chan,
                 feature_chans=listfmconfig.vision_enc_feat,
+                decoder_feature_chans=listfmconfig.vision_dec_feat,
                 num_pool_layers=listfmconfig.vision_enc_pool,
                 image_width=listfmconfig.vision_img_w,
                 block_type=listfmconfig.vision_block_type,
                 instruction_dim=listfmconfig.clip_emb_dim,
+                input_chans=listfmconfig.img_in_chan,
             )
 
     def forward(
@@ -54,7 +56,9 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
         grad_encoder: bool = True,
         use_bottleneck: bool = True,
         instruction: Tensor = None,
-    ) -> tuple[Tensor, Tensor, Tensor]:
+        flow_xt: Tensor | None = None,
+        flow_t: Tensor | None = None,
+    ) -> Tensor:
         validate_tensors([img, text])
         validate_tensor_dimensions([img], 4)
         validate_tensor_channels(img, self.listfmconfig.img_in_chan)
@@ -126,6 +130,8 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             x=img_full_feature,
             stack_feat=stack_feature,
             instruction=instruction,
+            flow_xt=flow_xt,
+            flow_t=flow_t,
         )
 
         return img_decode

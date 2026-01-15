@@ -69,7 +69,7 @@ class Trainer:
                 ckpt_path=Path(config.pretrained),
                 from_scratch=config.from_scratch,
                 use_vision_decoder=True,
-                use_vision_decoder_weights=True,
+                use_vision_decoder_weights=False,
             )
             logger.info(separator())
             logger.info("Model Config")

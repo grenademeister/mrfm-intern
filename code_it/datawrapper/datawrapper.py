@@ -85,7 +85,7 @@ class DataWrapper(Dataset):
             if split == "train":
                 total_list += files[:5000]
             else:
-                total_list += files[:500]
+                total_list += files[:100]
 
         self.file_list = total_list
         self.training_mode = training_mode

@@ -60,6 +60,67 @@ def get_loss_func(
         raise KeyError("loss func not matched")
 
 
+def sample_flow_t(
+    batch: int,
+    device: torch.device,
+) -> Tensor:
+    t = torch.rand(batch, 1, 1, 1, device=device)
+    if config.flow_t_min != 0.0 or config.flow_t_max != 1.0:
+        t = t * (config.flow_t_max - config.flow_t_min) + config.flow_t_min
+    return t
+
+
+def make_flow_pair(
+    label: Tensor,
+    t: Tensor,
+) -> tuple[Tensor, Tensor]:
+    x0 = torch.randn_like(label) * config.flow_noise_std
+    xt = (1.0 - t) * x0 + t * label
+    return x0, xt
+
+
+def rectified_flow_sample(
+    model: NETWORK,
+    img: Tensor,
+    text: Tensor,
+    instruction: Tensor,
+) -> Tensor:
+    steps = max(1, int(config.flow_eval_steps))
+    t_vals = torch.linspace(1.0, config.flow_eval_eps, steps, device=img.device)
+    x = torch.randn_like(img) * config.flow_noise_std
+
+    for i in range(steps - 1):
+        t = t_vals[i].view(1, 1, 1, 1).expand(img.shape[0], 1, 1, 1)
+        pred = model.forward(
+            img=img,
+            text=text,
+            use_bottleneck=config.use_bottleneck,
+            grad_encoder=config.grad_encoder,
+            instruction=instruction,
+            flow_xt=x,
+            flow_t=t.view(img.shape[0], 1),
+        )
+        t_safe = torch.clamp(t, min=config.flow_eval_eps)
+        v = (x - pred) / t_safe
+        dt = (t_vals[i + 1] - t_vals[i]).view(1, 1, 1, 1)
+        x = x + dt * v
+
+    t_last = t_vals[-1].view(1, 1, 1, 1).expand(img.shape[0], 1, 1, 1)
+    pred = model.forward(
+        img=img,
+        text=text,
+        use_bottleneck=config.use_bottleneck,
+        grad_encoder=config.grad_encoder,
+        instruction=instruction,
+        flow_xt=x,
+        flow_t=t_last.view(img.shape[0], 1),
+    )
+    t_safe = torch.clamp(t_last, min=config.flow_eval_eps)
+    v = (x - pred) / t_safe
+    x = x + (0.0 - t_last) * v
+    return x
+
+
 def get_learning_rate(
     epoch: int,
     lr: float,
@@ -175,12 +236,17 @@ def train_epoch_listfm_vision_pretraining(
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
     img_cnt_minibatch = input.shape[0]
 
+    flow_t = sample_flow_t(batch=img_cnt_minibatch, device=config.device)
+    flow_x0, flow_xt = make_flow_pair(label=label, t=flow_t)
+
     output = network.forward(
         img=input,
         text=text,
         instruction=instruction,
         use_bottleneck=config.use_bottleneck,
         grad_encoder=config.grad_encoder,
+        flow_xt=flow_xt,
+        flow_t=flow_t.view(img_cnt_minibatch, 1),
     )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
@@ -238,14 +304,13 @@ def test_part_listfm_vision_pretraining(
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
 
     batch_cnt = input.shape[0]
-
-    output = model.forward(
-        img=input,
-        text=text,
-        use_bottleneck=config.use_bottleneck,
-        grad_encoder=config.grad_encoder,
-        instruction=instruction,
-    )
+    with torch.no_grad():
+        output = rectified_flow_sample(
+            model=model,
+            img=input,
+            text=text,
+            instruction=instruction,
+        )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
 
