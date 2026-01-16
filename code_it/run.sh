@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOG_DATE="/home/intern2/fm2026/code_intern/code_it/logs"
+LOG_DATE="/home/intern2/fm2026/fm_flow/code_it/logs"
 
 # echo "[INFO] Removing previous log directory: $LOG_DATE"
 # rm -rf $LOG_DATE
@@ -27,7 +27,10 @@ echo "[INFO] Current directory: $(pwd)"
 #   fi
 # done
 
-export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat,/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat,/fast_storage/intern/data/instruction_tuning/chexpert_mat,/fast_storage/intern/data/instruction_tuning/mimiccxr_mat,/fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat"
+
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat,/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat, /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat"
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
 GPU="0,1,2,3,4,5,6,7"
@@ -60,5 +63,5 @@ unset DATA_ROOT
 unset TRAIN_ITER
 unset RUN_DIR
 
-echo "[INFO] Tail logs in: $LOG_DATE"
+# echo "[INFO] Tail logs in: $LOG_DATE"
 # find $LOG_DATE -type f -name "*.log" -exec tail -n 100 -f {} +
