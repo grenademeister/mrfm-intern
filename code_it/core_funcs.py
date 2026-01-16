@@ -1,3 +1,4 @@
+import math
 import os
 import time
 from collections.abc import Callable
@@ -79,12 +80,13 @@ def make_flow_pair(
     return x0, xt
 
 
-def rectified_flow_sample(
+def _rectified_flow_sample_dep(
     model: NETWORK,
     img: Tensor,
     text: Tensor,
     instruction: Tensor,
 ) -> Tensor:
+    """Deprecated rectified flow sampling function."""
     steps = max(1, int(config.flow_eval_steps))
     t_vals = torch.linspace(1.0, config.flow_eval_eps, steps, device=img.device)
     x = torch.randn_like(img) * config.flow_noise_std
@@ -121,14 +123,68 @@ def rectified_flow_sample(
     return x
 
 
+def rectified_flow_sample(
+    model: NETWORK,
+    img: Tensor,
+    text: Tensor,
+    instruction: Tensor,
+    steps: int | None = None,
+    t_eps: float | None = None,
+) -> Tensor:
+    steps = max(1, int(40 if steps is None else steps))
+    t_eps = config.flow_eval_eps if t_eps is None else t_eps
+    s = torch.linspace(0.0, 1.0, steps + 1, device=img.device)
+    t_vals = 0.5 - 0.5 * torch.cos(math.pi * s)
+    z = torch.randn_like(img) * config.flow_noise_std
+
+    for i in range(steps):
+        t = t_vals[i].view(1, 1, 1, 1).expand(img.shape[0], 1, 1, 1)
+        t_next = t_vals[i + 1].view(1, 1, 1, 1).expand(img.shape[0], 1, 1, 1)
+        x_pred = model.forward(
+            img=img,
+            text=text,
+            use_bottleneck=config.use_bottleneck,
+            grad_encoder=config.grad_encoder,
+            instruction=instruction,
+            flow_xt=z,
+            flow_t=t.view(img.shape[0], 1),
+        )
+        denom = (1.0 - t).clamp_min(t_eps)
+        v_pred = (x_pred - z) / denom
+        z = z + (t_next - t) * v_pred
+
+    return z
+
+
 def get_learning_rate(
     epoch: int,
     lr: float,
     lr_decay: float,
     lr_tol: int,
 ) -> float:
-    factor = epoch - lr_tol if lr_tol < epoch else 0
-    return lr * (lr_decay**factor)
+    if config.lr_schedule == "exp":
+        factor = epoch - lr_tol if lr_tol < epoch else 0
+        return lr * (lr_decay**factor)
+    if config.lr_schedule != "cosine_warmup":
+        raise KeyError(f"lr_schedule not matched: {config.lr_schedule}")
+
+    min_lr = config.lr_min
+    max_lr = lr
+    max_lr_final = config.lr_max_final
+    warmup_epochs = max(0, int(config.lr_warmup_epochs))
+    total_epochs = max(1, int(config.train_epoch))
+
+    if warmup_epochs > 0 and epoch < warmup_epochs:
+        warmup_progress = (epoch + 1) / warmup_epochs
+        return min_lr + (max_lr - min_lr) * warmup_progress
+
+    steps_after_warmup = max(1, total_epochs - warmup_epochs - 1)
+    progress = (epoch - warmup_epochs) / steps_after_warmup
+    progress = min(1.0, max(0.0, progress))
+
+    current_max = max_lr + (max_lr_final - max_lr) * progress
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return min_lr + (current_max - min_lr) * cosine
 
 
 def set_optimizer_lr(

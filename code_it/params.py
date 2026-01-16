@@ -34,15 +34,19 @@ class GeneralConfig:
     lr: float = 1e-3
     lr_decay: float = 0.90
     lr_tol: int = 1
+    lr_schedule: Literal["exp", "cosine_warmup"] = "cosine_warmup"
+    lr_min: float = 1e-5
+    lr_max_final: float = 1e-4
+    lr_warmup_epochs: int = 2
 
     # Train params
     gpu: str = "0,1"
     train_batch: int = 16
     valid_batch: int = 16
     train_epoch: int = 40
-    logging_density: int = 8
+    logging_density: int = 2
     valid_interval: int = 4
-    valid_tol: int = 10
+    valid_tol: int = 0
     num_workers: int = 32
     save_val: bool = True
     parallel: bool = True
@@ -60,7 +64,7 @@ class GeneralConfig:
     flow_t_max: float = 1.0
     flow_eval_t: float = 0.9
     flow_noise_std: float = 1.0
-    flow_eval_steps: int = 10
+    flow_eval_steps: int = 20
     flow_eval_eps: float = 1e-4
 
     # Data params

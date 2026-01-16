@@ -15,6 +15,7 @@ from datawrapper.warpper_utils import interpolate_to_target_width, resize_512
 simple_tokenizer = SimpleTokenizer()
 
 prob_half: float = 0.5
+norm_eps: float = 1e-6
 
 
 def _coerce_matlab_text(value: object) -> str:
@@ -30,6 +31,12 @@ def _coerce_matlab_text(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8")
     return str(value)
+
+
+def _normalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    mean = tensor.mean()
+    std = tensor.std(unbiased=False).clamp_min(norm_eps)
+    return (tensor - mean) / std
 
 
 class DataKey(IntEnum):
@@ -82,31 +89,19 @@ class DataWrapper(Dataset):
         total_list: list[str] = []
         for _file_path in file_path:
             files = glob.glob(f"{_file_path}/{data_type}")
-            if split == "train":
-                total_list += files[:5000]
+            if debug_mode:
+                if split == "train":
+                    total_list += files[:1000]
+                else:
+                    total_list += files[:10]
             else:
-                total_list += files[:100]
+                if split == "train":
+                    total_list += files
+                else:
+                    total_list += files[:100]
 
         self.file_list = total_list
         self.training_mode = training_mode
-
-        if debug_mode:
-            if training_mode:
-                self.file_list = self.file_list[::1000]
-            else:
-                self.file_list = self.file_list[::5000]
-
-        else:
-            if training_mode:
-                if train_percent >= 1.0:
-                    train_num = len(self.file_list)
-                else:
-                    train_num = int(subject_num * slice_per_subject * train_percent)
-                self.file_list = self.file_list[:train_num]
-            else:
-                # valid_num = int(subject_num * slice_per_subject * ((1 - train_percent) / 2))
-                # self.file_list = self.file_list[:valid_num]
-                self.file_list = self.file_list[:3000]
 
         self.acs_num = acs_num
         self.parallel_factor = parallel_factor
@@ -137,9 +132,11 @@ class DataWrapper(Dataset):
         img = resize_512(img)
         tgt = resize_512(interpolate_to_target_width(tgt, target_size=512))
 
+        img = _normalize_tensor(img)
+        tgt = _normalize_tensor(tgt)
+
         input = img.clone()
         # input, _, _ = apply_fixed_mask(input, acs_num=self.acs_num, parallel_factor=self.parallel_factor)
-        input = input.abs().to(torch.float32)
 
         text = loadmat(self.file_list[idx])["text"][0][0]
         text = _coerce_matlab_text(text)
