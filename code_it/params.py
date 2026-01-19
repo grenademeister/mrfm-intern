@@ -7,7 +7,7 @@ from typing import Literal
 import torch
 from params_data import TEST_DATASET, TRAIN_DATASET, VALID_DATASET
 
-default_run_dir: str = "/home/intern2/fm2026/code_intern/logs"
+default_run_dir: str = "/home/intern2/fm2026/fm_flow/logs"
 RUN_DIR: str = os.environ.get("RUN_DIR", default_run_dir)
 
 
@@ -31,18 +31,22 @@ class GeneralConfig:
     # Optimizer
     optimizer: Literal["adam", "adamw"] = "adam"
     loss_model: Literal["l1", "l2"] = "l2"
-    lr: float = 2e-4
-    lr_decay: float = 0.88
+    lr: float = 1e-3
+    lr_decay: float = 0.90
     lr_tol: int = 1
+    lr_schedule: Literal["exp", "cosine_warmup"] = "cosine_warmup"
+    lr_min: float = 1e-5
+    lr_max_final: float = 1e-4
+    lr_warmup_epochs: int = 2
 
     # Train params
     gpu: str = "0,1"
     train_batch: int = 16
     valid_batch: int = 16
     train_epoch: int = 40
-    logging_density: int = 8
+    logging_density: int = 2
     valid_interval: int = 4
-    valid_tol: int = 4
+    valid_tol: int = 0
     num_workers: int = 32
     save_val: bool = True
     parallel: bool = True
@@ -52,8 +56,16 @@ class GeneralConfig:
     # Pretrained
     pretrained: str = "/home/juhyung/code/fm2026/code_downstream_recon/checkpoint_v2.1.ckpt"
     use_bottleneck: bool = True
-    grad_encoder: bool = False
+    grad_encoder: bool = True
     from_scratch: bool = False
+
+    # Rectified flow
+    flow_t_min: float = 0.0
+    flow_t_max: float = 1.0
+    flow_eval_t: float = 0.9
+    flow_noise_std: float = 1.0
+    flow_eval_steps: int = 20
+    flow_eval_eps: float = 1e-4
 
     # Data params
     acs_num: int = 24

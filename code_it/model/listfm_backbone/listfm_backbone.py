@@ -93,6 +93,7 @@ class LISTFMConfig:
     bottleneck_head: int
     tokenizer_bpe: Path
     clip_emb_dim: int
+    vision_dec_feat: int = 16
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -360,12 +361,26 @@ class LISTFoundationModelBackbone(torch.nn.Module):
         self,
         img_feat: torch.Tensor,
         stack: list[torch.Tensor],
+        flow_xt: torch.Tensor | None = None,
+        flow_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if self.vision_decoder is None:
             raise RuntimeError("Vision decoder not enabled.")
+        if flow_xt is None:
+            flow_xt = torch.randn(
+                img_feat.shape[0],
+                self.listfmconfig.img_in_chan,
+                self.listfmconfig.vision_img_w,
+                self.listfmconfig.vision_img_w,
+                device=img_feat.device,
+            )
+        if flow_t is None:
+            flow_t = torch.full((img_feat.shape[0], 1), 0.5, device=img_feat.device)
         return self.vision_decoder.forward(
             x=img_feat,
             stack_feat=stack,
+            flow_xt=flow_xt,
+            flow_t=flow_t,
         )
 
     def inference(
