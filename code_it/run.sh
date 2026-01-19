@@ -27,8 +27,8 @@ echo "[INFO] Current directory: $(pwd)"
 #   fi
 # done
 
-export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
 
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat,/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat, /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat"
 export RUN_DIR=$LOG_DATE

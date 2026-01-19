@@ -44,7 +44,7 @@ class GeneralConfig:
     train_batch: int = 16
     valid_batch: int = 16
     train_epoch: int = 40
-    logging_density: int = 2
+    logging_density: int = 4
     valid_interval: int = 4
     valid_tol: int = 0
     num_workers: int = 32
