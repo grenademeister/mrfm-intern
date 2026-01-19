@@ -260,24 +260,8 @@ class VisionTextDecoder(nn.Module):
         if flow_xt is None or flow_t is None:
             raise ValueError("flow_xt and flow_t must be provided for rectified-flow decoding.")
 
-<<<<<<< HEAD
-        output = x
-
-        H, W = self.embed_w, self.embed_w
-        C = self.init_chan
-        B = x.shape[0]
-
-        # [B, 257, 1024] → [B, 1024, 257]
-        output = output.permute(0, 2, 1)
-        # use 256 tokens (delete class token )
-        output = output[:, :C, : self.embed_w**2]
-        # [B, 1024, 256] → [B, 1024, 16, 16]
-        output = output.reshape(B, C, H, W)
-
-=======
         batch_size = x.shape[0]
         instruction = self._prepare_instruction(instruction)
->>>>>>> origin
         if instruction is not None:
             if len(self.instruction_adapters) != len(self.up_sample_layers):
                 raise RuntimeError("Instruction adapters not configured for conditioning.")

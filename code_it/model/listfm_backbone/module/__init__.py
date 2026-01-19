@@ -1,5 +1,6 @@
 from .bottleneck.bottleneck import Bottleneck
 from .text.text_encoder import TextEncoder
+from .text.text_Qformer import TextQFormer
 from .tokenizer.simple_tokenizer import SimpleTokenizer
 from .vision.conv_block import BlockType
 from .vision.vision_decoder import VisionDecoder
@@ -11,6 +12,7 @@ __all__ = [
     "Bottleneck",
     "SimpleTokenizer",
     "TextEncoder",
+    "TextQFormer",
     "VisionDecoder",
     "VisionEncoder",
     "VisionTextDecoder",

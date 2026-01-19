@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOG_DATE="/home/intern2/fm2026/fm_flow/code_it/logs"
+LOG_DATE="/home/intern4/fm2026/fm_flow/code_it/logs"
 
 # echo "[INFO] Removing previous log directory: $LOG_DATE"
 # rm -rf $LOG_DATE
@@ -8,7 +8,7 @@ LOG_DATE="/home/intern2/fm2026/fm_flow/code_it/logs"
 echo "[INFO] Removing nohup.out"
 rm -rf nohup.out
 
-PYTHON_PATH=/home/intern2/.conda/envs/fm/bin/python
+PYTHON_PATH=/home/intern4/.conda/envs/research/bin/python
 
 echo "[INFO] Current directory: $(pwd)"
 # echo "[INFO] Python files and contents in current directory:"
@@ -27,14 +27,16 @@ echo "[INFO] Current directory: $(pwd)"
 #   fi
 # done
 
-export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat"
 
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat,/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat, /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat"
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
-GPU="0,1,2,3,4,5,6,7"
-TRAIN_BATCH=64
+GPU="2,3,4,5,6,7"
+TRAIN_BATCH=48
+LOG_FILE="$LOG_DATE/train_$(date +%Y%m%d_%H%M%S).log"
+
 nohup $PYTHON_PATH train.py \
   --gpu $GPU \
   --train_batch $TRAIN_BATCH \
@@ -59,7 +61,7 @@ nohup $PYTHON_PATH train.py \
 
 # sleep 20
 
-unset DATA_ROOT
+unset DATA_ROOTS
 unset TRAIN_ITER
 unset RUN_DIR
 

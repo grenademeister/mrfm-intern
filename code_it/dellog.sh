@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-run_dir="/home/intern2/fm2026/fm_flow/code_it/logs"
+run_dir="/home/intern4/fm2026/fm_flow/code_it/logs"
 if [[ -n "${RUN_DIR:-}" ]]; then
   run_dir="$RUN_DIR"
 fi

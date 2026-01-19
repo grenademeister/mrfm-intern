@@ -11,6 +11,7 @@ from model.listfm_backbone.module import (
     TextEncoder,
     VisionTextDecoder,
     VisionEncoder,
+    TextQFormer,
 )
 from model.listfm_backbone.utils import (
     logger,
@@ -27,6 +28,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
     tokenizer: SimpleTokenizer  # predefined
     bottleneck: Bottleneck  # predefined
     vision_decoder: VisionTextDecoder
+    qformer: TextQFormer
 
     def __init__(
         self,
@@ -48,6 +50,14 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 instruction_dim=listfmconfig.clip_emb_dim,
                 input_chans=listfmconfig.img_in_chan,
             )
+        
+        self.qformer = TextQFormer(
+            d_model=listfmconfig.clip_emb_dim,
+            n_queries=1,
+            n_heads=8,
+            n_layers=2,
+            dropout=0.1,
+        )
 
     def forward(
         self,
@@ -88,7 +98,9 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 ) = self.text_encoder(
                     text=instruction,
                 )
-            instruction = instruction_full_feature
+            instruction_mask = (instruction != 0).long()  # (B, L)
+            instruction = self.qformer(instruction_full_feature, instruction_mask) # (B, Q, D)
+            instruction = instruction[:, 0, :]  # (B, D)
 
         img = self._preprocess_image(img=img)
         if not grad_encoder:
