@@ -157,7 +157,7 @@ def process_protocol_unit(idx: int):
             src_volume = src_data.get_fdata()
             tgt_volume = tgt_data.get_fdata()
 
-                
+            
             if src_shape == tgt_shape and src_ses != tgt_ses and volume_intensity_difference(src_volume, tgt_volume) < 45:
                 selected_slices = choose_slice_index(src_volume, num_slices=4, rng=rng)
                 

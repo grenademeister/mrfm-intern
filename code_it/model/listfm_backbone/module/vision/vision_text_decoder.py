@@ -107,8 +107,11 @@ class VisionTextDecoder(nn.Module):
         C = self.init_chan
         B = x.shape[0]
 
+        # [B, 257, 1024] → [B, 1024, 257]
         output = output.permute(0, 2, 1)
+        # use 256 tokens (delete class token )
         output = output[:, :C, : self.embed_w**2]
+        # [B, 1024, 256] → [B, 1024, 16, 16]
         output = output.reshape(B, C, H, W)
 
         if instruction is not None:
