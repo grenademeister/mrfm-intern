@@ -1,0 +1,15 @@
+[project]
+name = "mrfm-intern"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ftfy>=6.3.1",
+    "fvcore>=0.1.5.post20221221",
+    "huggingface-hub>=0.36.0",
+    "loguru>=0.7.3",
+    "safetensors>=0.7.0",
+    "torch>=2.9.1",
+    "transformers>=4.56.0",
+]

@@ -123,13 +123,3 @@ class VisionEncoder(nn.Module):
         output = output @ self.proj
 
         return output, full_feature, stack
-
-
-if __name__ == "__main__":
-    model = VisionEncoder()
-    x = torch.randn(2, 2, 512, 512)
-    out, full_feature, stack = model(x)
-    print(f"out shape: {out.shape}")
-    print(f"full_feature shape: {full_feature.shape}")
-    for i, s in enumerate(stack):
-        print(f"stack[{i}] shape: {s.shape}")

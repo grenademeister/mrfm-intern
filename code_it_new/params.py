@@ -24,29 +24,26 @@ class GeneralConfig:
     log_lv: str = "INFO"
     run_dir: Path = Path(RUN_DIR)
     init_time: float = 0.0
-    tb_enable: bool = True
-    tb_log_dir: str = "tb"
-    tb_log_batch: bool = True
 
     # Model experiment
     model_type: Literal["listfm_it", "unet"] = "listfm_it"
 
     # Optimizer
-    optimizer: Literal["adam", "adamw"] = "adamw"
+    optimizer: Literal["adam", "adamw"] = "adam"
     loss_model: Literal["l1", "l2"] = "l2"
-    lr: float = 5e-4
-    lr_decay: float = 0.95
+    lr: float = 1e-3
+    lr_decay: float = 0.90
     lr_tol: int = 1
-    lr_schedule: Literal["exp", "cosine_warmup"] = "exp"
+    lr_schedule: Literal["exp", "cosine_warmup"] = "cosine_warmup"
     lr_min: float = 1e-5
     lr_max_final: float = 1e-4
     lr_warmup_epochs: int = 2
 
     # Train params
-    gpu: str = "0,1,2,3"
+    gpu: str = "0,1"
     train_batch: int = 16
-    valid_batch: int = 128
-    train_epoch: int = 80
+    valid_batch: int = 16
+    train_epoch: int = 40
     logging_density: int = 4
     valid_interval: int = 4
     valid_tol: int = 0

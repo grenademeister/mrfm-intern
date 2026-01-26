@@ -1,8 +1,12 @@
 # Ignore everything by default; allow only selected directories.
 *
 !.gitignore
+!pyproject.toml
+!uv.lock
 !code_it/
 !code_it/**
+!code_it_new/
+!code_it_new/**
 !data_prep/
 !data_prep/**
 

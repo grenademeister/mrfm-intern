@@ -129,6 +129,14 @@ class VisionTextDecoder(nn.Module):
         self.input_chans = input_chans if input_chans is not None else out_chans
         self.instruction_dim = instruction_dim
 
+        self.instruction_pool = None
+        if instruction_dim is not None:
+            self.instruction_pool = nn.Sequential(
+                nn.Linear(instruction_dim, instruction_dim),
+                nn.SiLU(inplace=True),
+                nn.Linear(instruction_dim, 1),
+            )
+
         # Up-sampling layers
         self.up_sample_layers = create_up_sample_layers_with_xt(
             chans=decoder_feature_chans,
@@ -218,11 +226,15 @@ class VisionTextDecoder(nn.Module):
     ) -> torch.Tensor | None:
         if instruction is None:
             return None
-        if instruction.dim() == 3:
-            instruction = instruction.mean(dim=1)
-        if instruction.dim() != 2:
-            raise ValueError("instruction must be 2D or 3D tensor.")
-        return instruction
+        if instruction.dim() == 2:
+            raise ValueError("instruction must be a 3D (B, N, D) tensor.")
+        if instruction.dim() != 3:
+            raise ValueError("instruction must be a 3D (B, N, D) tensor.")
+        if self.instruction_pool is None:
+            raise RuntimeError("instruction_dim must be set when instruction is provided.")
+        weights = self.instruction_pool(instruction).squeeze(-1)
+        weights = torch.softmax(weights, dim=1)
+        return torch.sum(instruction * weights.unsqueeze(-1), dim=1)
 
     def _prepare_flow_t(
         self,
