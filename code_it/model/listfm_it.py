@@ -2,6 +2,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 
 from model.listfm_backbone import LISTFMConfig, LISTFoundationModelBackbone
@@ -27,6 +28,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
     tokenizer: SimpleTokenizer  # predefined
     bottleneck: Bottleneck  # predefined
     vision_decoder: VisionTextDecoder
+    instruction_encoder: TextEncoder
 
     def __init__(
         self,
@@ -48,6 +50,15 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 instruction_dim=listfmconfig.clip_emb_dim,
                 input_chans=listfmconfig.img_in_chan,
             )
+            self.instruction_encoder = TextEncoder(
+                embed_dim=listfmconfig.clip_emb_dim,
+                context_length=64,
+                vocab_size=listfmconfig.text_enc_vocab_size,
+                transformer_width=listfmconfig.text_enc_tf_w,
+                transformer_heads=listfmconfig.text_enc_tf_head,
+                transformer_layers=listfmconfig.text_enc_tf_head,
+                pretrained_model_weights=listfmconfig.text_enc_pretrained,
+            )
 
     def forward(
         self,
@@ -61,7 +72,14 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
     ) -> Tensor:
         validate_tensors([img, text])
         validate_tensor_dimensions([img], 4)
+        validate_tensor_dimensions([text], 2)
         validate_tensor_channels(img, self.listfmconfig.img_in_chan)
+
+        instruction_copied = instruction
+        instruction_copied = F.pad(
+            instruction_copied,
+            (0, self.listfmconfig.text_enc_context - instruction_copied.shape[1]),
+        )
 
         text_ctx = torch.no_grad() if not grad_encoder else nullcontext()
         text_full_feature = None
@@ -70,7 +88,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 (
                     _text_features,
                     text_full_feature,
-                ) = self.text_encoder(
+                ) = self.instruction_encoder(
                     text=text,
                 )
             instruction = text_full_feature
@@ -85,7 +103,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 (
                     _instruction_features,
                     instruction_full_feature,
-                ) = self.text_encoder(
+                ) = self.instruction_encoder(
                     text=instruction,
                 )
             instruction = instruction_full_feature
@@ -116,7 +134,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                         _text_features,
                         text_full_feature,
                     ) = self.text_encoder(
-                        text=text,
+                        text=instruction_copied,
                     )
             (
                 img_full_feature,

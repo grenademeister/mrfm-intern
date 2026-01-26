@@ -433,20 +433,20 @@ class LISTFoundationModelBackbone(torch.nn.Module):
             self.listfmconfig.img_in_chan,
             self.listfmconfig.vision_img_w,
             self.listfmconfig.vision_img_w,
-        )
+        )  # (B, 1, 512, 512)
         text = self.tokenizer.tokenize(
             texts=["a dog", "a cat"],
             context_length=self.listfmconfig.text_enc_context,
         )
-        logger.debug(f"Image size: {img.shape}")
-        logger.debug(f"Text size: {text.shape}")
+        logger.debug(f"Image size: {img.shape}")  # (B, 1, 512, 512)
+        logger.debug(f"Text size: {text.shape}")  # (B, 1536)
         (
             img_full_feature,
             text_full_feature,
             _stack_feature,
         ) = self.inference(img=img, text=text)
-        logger.debug(f"img_full_feature size: {img_full_feature.shape}")
-        logger.debug(f"text_full_feature size: {text_full_feature.shape}")
+        logger.debug(f"img_full_feature size: {img_full_feature.shape}")  # (B, 1025, 512)
+        logger.debug(f"text_full_feature size: {text_full_feature.shape}")  # (B, 1536, 512)
         logger.debug(
             f"img mean std max min: {img_full_feature.mean().item():.4f} {img_full_feature.std().item():.4f} {img_full_feature.max().item():.4f} {img_full_feature.min().item():.4f}"  # noqa: E501
         )

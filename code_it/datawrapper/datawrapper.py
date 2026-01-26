@@ -96,7 +96,7 @@ class DataWrapper(Dataset):
                     total_list += files[:10]
             else:
                 if split == "train":
-                    total_list += files
+                    total_list += files[:10000]
                 else:
                     total_list += files[:100]
 
@@ -145,7 +145,7 @@ class DataWrapper(Dataset):
         # use existing text encoder for now
         instruction = loadmat(self.file_list[idx])["instruction"][0][0]
         instruction = _coerce_matlab_text(instruction)
-        instruction_token = simple_tokenizer.tokenize(instruction, context_length=1536).squeeze()
+        instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
 
         return (
             input,
