@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from common.logger import logger, logger_add_handler
 from common.utils import (
@@ -29,6 +30,7 @@ class Trainer:
     train_len: int
     valid_loader: DataLoader
     optims: list[OPTIM | None]
+    tb_writer: SummaryWriter | None
 
     def __init__(
         self,
@@ -45,6 +47,11 @@ class Trainer:
         logger.info(separator())
         logger.info(f"Run dir: {self.run_dir}")
         os.makedirs(self.run_dir, exist_ok=True)
+        self.tb_writer = None
+        if config.tb_enable:
+            tb_dir = self.run_dir / config.tb_log_dir
+            os.makedirs(tb_dir, exist_ok=True)
+            self.tb_writer = SummaryWriter(log_dir=str(tb_dir))
 
         # log config
         logger.info(separator())
@@ -56,9 +63,14 @@ class Trainer:
     def __call__(
         self,
     ) -> None:
-        self._set_data()
-        self._set_network()
-        self._train()
+        try:
+            self._set_data()
+            self._set_network()
+            self._train()
+        finally:
+            if self.tb_writer is not None:
+                self.tb_writer.flush()
+                self.tb_writer.close()
 
     @error_wrap
     def _set_data(
@@ -197,6 +209,8 @@ class Trainer:
 
             optims = [set_optimizer_lr(optimizer=optim, learning_rate=lr_epoch) for optim in self.optims]
             logger.info(f"Learning rate: {lr_epoch:0.3e}")
+            if self.tb_writer is not None:
+                self.tb_writer.add_scalar("train/lr", lr_epoch, epoch)
 
             train_epoch(
                 train_loader=self.train_loader,
@@ -204,6 +218,8 @@ class Trainer:
                 network=self.network,
                 optim_list=optims,
                 epoch=epoch,
+                tb_writer=self.tb_writer,
+                tb_log_batch=config.tb_log_batch,
             )
 
             save_checkpoint(
@@ -241,6 +257,8 @@ class Trainer:
                 network=self.network,
                 run_dir=self.run_dir,
                 save_val=False,
+                tb_writer=self.tb_writer,
+                tb_prefix="valid",
             )
         return primary_metric
 
@@ -257,6 +275,8 @@ class Trainer:
                 network=self.network,
                 run_dir=self.run_dir,
                 save_val=config.save_val,
+                tb_writer=self.tb_writer,
+                tb_prefix="test",
             )
 
 
