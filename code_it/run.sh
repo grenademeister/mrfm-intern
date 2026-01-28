@@ -12,18 +12,18 @@ echo "[INFO] Current directory: $(pwd)"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_denoise_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"
 
 # use all
-export DATA_ROOT=["/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat",
-"/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple",
-"/fast_storage/intern/data/instruction_tuning/brats_denoise_mat",
-"/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"]
+# export DATA_ROOT=["/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat",
+# "/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple",
+# "/fast_storage/intern/data/instruction_tuning/brats_denoise_mat",
+# "/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"]
 
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
 
-GPU="2,3,4"
+GPU="1,2,3"
 TRAIN_BATCH=27
 nohup $PYTHON_PATH train.py \
   --gpu $GPU \

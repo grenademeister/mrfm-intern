@@ -171,3 +171,12 @@ class SimpleTokenizer:
             result[i, : len(tokens)] = torch.tensor(tokens)
 
         return result
+
+
+if __name__ == "__main__":
+    tokenizer = SimpleTokenizer()
+    text = "2 4 6 8"
+    tokens = tokenizer.tokenize(text, context_length=10)
+    print("Tokens:", tokens)
+    decoded_text = tokenizer.decode(tokens[0].tolist())
+    print("Decoded text:", decoded_text)
