@@ -57,9 +57,9 @@ def split_dataset(
 
 if __name__ == "__main__":
     split_dataset(
-        src_dir="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat",
-        out_dir="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat",
-        ratios=(0.8, 0.1, 0.1),
+        src_dir="/fast_storage/intern/data/instruction_tuning/brats_denoise_mat",
+        out_dir="/fast_storage/intern/data/instruction_tuning/brats_denoise_mat",
+        ratios=(0.975, 0.0125, 0.0125),
         seed=42,
         exts={".mat"},  # e.g. {'.jpg', '.png'}
         option="move",  # or "copy"

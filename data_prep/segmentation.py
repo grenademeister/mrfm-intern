@@ -1,5 +1,13 @@
 import os
+
+# # Limit threading in numerical libraries to prevent oversubscription
+# os.environ["OMP_NUM_THREADS"] = "1"
+# os.environ["MKL_NUM_THREADS"] = "1"
+# os.environ["OPENBLAS_NUM_THREADS"] = "1"
+# os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import random
+import time
 import re
 from multiprocessing import Pool
 from pathlib import Path
@@ -7,29 +15,33 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from scipy.io import savemat
+from scipy.ndimage import binary_dilation, binary_erosion
+
+from slice_cache import DEFAULT_CACHE_MODALITY, choose_slice_index, choose_slice_index_cached, load_slice_cache
 
 # Configuration (edit these values as needed)
 DATA_DIR = "/fast_storage/intern/data/data_curation"
 BRATS_DIR = f"{DATA_DIR}/brats"
 # OUTPUT_DIR = "./brats_segmentation_mat"
-OUTPUT_DIR = "/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat"
-NUM_SAMPLES = 5000
+OUTPUT_DIR = "/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"
+NUM_SAMPLES = 8000
 SEED = 42
-WORKERS = max(1, (os.cpu_count() or 1) - 10)
+WORKERS = max(1, (os.cpu_count() or 2) - 10)
 
 # Sampling behavior
-PREFER_TUMOR_SLICE_PROB = 0.7
+PREFER_TUMOR_SLICE_PROB = 0.5
 VALID_MODALITIES = ["flair", "t1", "t1ce", "t2"]
+CACHE_MODALITY = DEFAULT_CACHE_MODALITY
 
 INSTRUCTION_TEMPLATES = [
     "Segment all tumor regions in this {modality} MRI slice.",
-    "Identify and mask the brain tumor areas in the {modality} image.",
     "Generate a segmentation mask for tumor regions in this {modality} slice.",
     "Please segment the tumor in this {modality} MRI scan.",
-    "Create a mask for all tumor tissue in the {modality} image.",
     "Locate and segment tumor regions in this {modality} brain MRI slice.",
-    "Delineate tumor areas in the {modality} MRI slice.",
     "Produce a segmentation for tumor regions in this {modality} image.",
+    "Segment the tumor areas in this {modality} MRI slice of the brain.",
+    "Identify and segment tumors in this {modality} brain MRI image.",
+    "Create a tumor segmentation map for this {modality} MRI slice.",
 ]
 
 
@@ -75,14 +87,6 @@ def get_brats_case(case_id: str, root: str | Path) -> dict[str, Path]:
     return files
 
 
-def choose_slice_index(seg_volume: np.ndarray, prefer_tumor_prob: float, rng: random.Random = random) -> int:
-    depth = seg_volume.shape[2]
-    tumor_slices = np.where(np.any(seg_volume != 0, axis=(0, 1)))[0]
-    if tumor_slices.size > 0 and rng.random() < prefer_tumor_prob:
-        return int(rng.choice(tumor_slices))
-    return rng.randrange(depth)
-
-
 def make_instruction(modality: str, rng: random.Random = random) -> str:
     template = rng.choice(INSTRUCTION_TEMPLATES)
     return template.format(modality=modality.upper())
@@ -91,13 +95,15 @@ def make_instruction(modality: str, rng: random.Random = random) -> str:
 _WORKER_UIDS: list[str] = []
 _WORKER_OUT_DIR: Path | None = None
 _WORKER_SEED = 0
+_WORKER_CACHE: dict[str, tuple[np.ndarray, np.ndarray, int]] | None = None
 
 
 def _init_worker(uids: list[str], out_dir: str, seed: int) -> None:
-    global _WORKER_UIDS, _WORKER_OUT_DIR, _WORKER_SEED
+    global _WORKER_UIDS, _WORKER_OUT_DIR, _WORKER_SEED, _WORKER_CACHE
     _WORKER_UIDS = uids
     _WORKER_OUT_DIR = Path(out_dir)
     _WORKER_SEED = seed
+    _WORKER_CACHE = load_slice_cache(CACHE_MODALITY)
 
 
 def _generate_sample(idx: int) -> None:
@@ -111,9 +117,22 @@ def _generate_sample(idx: int) -> None:
     img_volume, header_text = load_nifti_data_and_header(case_files[modality])
     seg_volume = load_nifti_image(case_files["seg"])
 
-    slice_idx = choose_slice_index(seg_volume, PREFER_TUMOR_SLICE_PROB, rng=rng)
+    slice_idx = choose_slice_index_cached(
+        case_id,
+        img_volume.shape[2],
+        PREFER_TUMOR_SLICE_PROB,
+        rng,
+        _WORKER_CACHE,
+        lambda: choose_slice_index(img_volume, seg_volume, PREFER_TUMOR_SLICE_PROB, rng),
+    )
     image_slice = img_volume[:, :, slice_idx].astype(np.float32)
-    label_slice = seg_volume[:, :, slice_idx].astype(np.uint8)
+    seg_slice = seg_volume[:, :, slice_idx].astype(np.uint8)
+
+    # Create overlay: original image with segmentation boundary blacked out
+    mask_binary = seg_slice > 0
+    boundary = binary_dilation(mask_binary) & ~binary_erosion(mask_binary)
+    label_slice = image_slice.copy()
+    label_slice[boundary] = 0
 
     instruction = make_instruction(modality, rng=rng)
 
@@ -139,9 +158,21 @@ def main() -> None:
     if not uids:
         raise RuntimeError(f"No BRATS cases found under {BRATS_DIR}")
 
+    start_time = time.time()
+    log_every = max(1, NUM_SAMPLES // 100)
+
     with Pool(processes=WORKERS, initializer=_init_worker, initargs=(uids, str(out_dir), SEED)) as pool:
         for done, _ in enumerate(pool.imap_unordered(_generate_sample, range(NUM_SAMPLES)), start=1):
-            print(f"{done}/{NUM_SAMPLES} samples created", end="\r")
+            if done % log_every == 0 or done == NUM_SAMPLES:
+                elapsed = time.time() - start_time
+                rate = done / elapsed if elapsed > 0 else 0.0
+                remaining = NUM_SAMPLES - done
+                eta_min = (remaining / rate) / 60 if rate > 0 else float("inf")
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                print(
+                    f"[{timestamp}] {done}/{NUM_SAMPLES} samples created | " f"{rate:.2f}/s | ETA {eta_min:.1f} min",
+                    flush=True,
+                )
 
     print(f"Saved {NUM_SAMPLES} samples to {out_dir.resolve()}")
 

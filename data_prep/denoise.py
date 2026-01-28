@@ -21,8 +21,8 @@ from slice_cache import DEFAULT_CACHE_MODALITY, choose_slice_index, choose_slice
 # Configuration (edit these values as needed)
 DATA_DIR = "/fast_storage/intern/data/data_curation"
 BRATS_DIR = f"{DATA_DIR}/brats"
-# OUTPUT_DIR = "./brats_crossmodal_mat"
-OUTPUT_DIR = "/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
+# OUTPUT_DIR = "./brats_denoise_mat"
+OUTPUT_DIR = "/fast_storage/intern/data/instruction_tuning/brats_denoise_mat"
 NUM_SAMPLES = 8000
 SEED = 42
 WORKERS = max(1, (os.cpu_count() or 2) // 2)
@@ -32,13 +32,21 @@ PREFER_TUMOR_SLICE_PROB = 0.5
 VALID_MODALITIES = ["flair", "t1", "t1ce", "t2"]
 CACHE_MODALITY = DEFAULT_CACHE_MODALITY
 
+# Noise parameters
+NOISE_LEVEL_RANGE = (0.02, 0.15)  # Fraction of k-space magnitude
+SNR_RANGE = (5.0, 25.0)  # Target SNR in dB
+
 INSTRUCTION_TEMPLATES = [
-    "Generate a {tgt} MRI slice.",
-    "Create a {tgt} brain MRI image.",
-    "Synthesize a {tgt} MRI slice.",
-    "Produce a {tgt} modality image.",
-    "Render a {tgt} MRI slice.",
-    "Output a {tgt} brain MRI slice.",
+    "Denoise this {modality} brain MRI slice.",
+    "Remove noise from this {modality} MRI image.",
+    "Clean up this noisy {modality} brain MRI slice.",
+    "Restore this degraded {modality} MRI scan slice.",
+    "Enhance the quality of this {modality} brain MRI image.",
+    "Reduce artifacts in this {modality} MRI slice.",
+    "Improve the signal quality of this {modality} brain MRI slice.",
+    "Suppress noise in this {modality} MRI scan.",
+    "Reconstruct a clean {modality} image from this noisy input.",
+    "Filter out noise from this {modality} brain MRI slice.",
 ]
 
 
@@ -84,9 +92,52 @@ def get_brats_case(case_id: str, root: str | Path) -> dict[str, Path]:
     return files
 
 
-def make_instruction(src: str, tgt: str, rng: random.Random = random) -> str:
+def add_kspace_noise(image: np.ndarray, target_snr: float, rng: random.Random = random) -> np.ndarray:
+    """Add noise in k-space to achieve target SNR and return noisy image."""
+    # Calculate signal level from image
+    mask = image > 0.05 * np.max(image)
+    signal_level = image[mask].mean()
+
+    # Calculate noise standard deviation from target SNR (in image space)
+    noise_std_image = signal_level / target_snr
+
+    # Scale for k-space: need to account for IFFT normalization
+    # numpy's ifft2 divides by N, so k-space noise needs to be scaled up
+    n_pixels = image.shape[0] * image.shape[1]
+    noise_std_kspace = noise_std_image * np.sqrt(n_pixels)
+
+    # Convert to k-space
+    kspace = np.fft.fft2(image)
+
+    # Create numpy RNG from random.Random seed state
+    np_rng = np.random.RandomState(rng.randint(0, 2**31 - 1))
+
+    # Add complex Gaussian noise in k-space
+    noise_real = np_rng.normal(0, noise_std_kspace, kspace.shape)
+    noise_imag = np_rng.normal(0, noise_std_kspace, kspace.shape)
+    noisy_kspace = kspace + noise_real + 1j * noise_imag
+
+    # Convert back to image space
+    noisy_image = np.fft.ifft2(noisy_kspace)
+
+    # Return magnitude (MRI images are magnitude images)
+    return np.abs(noisy_image).astype(np.float32)
+
+
+def calculate_snr(clean_image: np.ndarray, noisy_image: np.ndarray) -> float:
+    """Calculate SNR between clean and noisy images."""
+    mask = clean_image > 0.05 * np.max(clean_image)
+    signal = clean_image[mask].mean()
+    noise = noisy_image[mask] - clean_image[mask]
+    noise_std = np.std(noise)
+    if noise_std == 0:
+        return float("inf")
+    return signal / noise_std
+
+
+def make_instruction(modality: str, rng: random.Random = random) -> str:
     template = rng.choice(INSTRUCTION_TEMPLATES)
-    return template.format(src=src.upper(), tgt=tgt.upper())
+    return template.format(modality=modality.upper())
 
 
 _WORKER_UIDS: list[str] = []
@@ -110,35 +161,37 @@ def _generate_sample(idx: int) -> None:
     case_id = rng.choice(_WORKER_UIDS)
     case_files = get_brats_case(case_id, BRATS_DIR)
 
-    src, tgt = rng.sample(VALID_MODALITIES, 2)
-    src_volume, header_text = load_nifti_data_and_header(case_files[src])
-    tgt_volume = load_nifti_image(case_files[tgt])
+    modality = rng.choice(VALID_MODALITIES)
+    img_volume, header_text = load_nifti_data_and_header(case_files[modality])
     slice_idx = choose_slice_index_cached(
         case_id,
-        tgt_volume.shape[2],
+        img_volume.shape[2],
         PREFER_TUMOR_SLICE_PROB,
         rng,
         _WORKER_CACHE,
         lambda: choose_slice_index(
-            tgt_volume,
+            img_volume,
             load_nifti_image(case_files["seg"]),
             PREFER_TUMOR_SLICE_PROB,
             rng,
         ),
     )
-    src_slice = src_volume[:, :, slice_idx].astype(np.float32)
-    tgt_slice = tgt_volume[:, :, slice_idx].astype(np.float32)
+    clean_slice = img_volume[:, :, slice_idx].astype(np.float32)
 
-    instruction = make_instruction(src, tgt, rng=rng)
+    # Generate noisy version via k-space with target SNR
+    target_snr = rng.uniform(*SNR_RANGE)
+    noisy_slice = add_kspace_noise(clean_slice, target_snr, rng=rng)
+
+    instruction = make_instruction(modality, rng=rng)
 
     data = {
-        "image": src_slice,
-        "label": tgt_slice,
+        "image": noisy_slice,
+        "label": clean_slice,
         "instruction": np.array(instruction, dtype=object),
         "text": np.array(header_text, dtype=object),
     }
 
-    out_path = _WORKER_OUT_DIR / f"brats_{case_id}_{src}_to_{tgt}_slice_{slice_idx:03d}_{idx:06d}.mat"
+    out_path = _WORKER_OUT_DIR / f"brats_{case_id}_{modality}_denoise_slice_{slice_idx:03d}_{idx:06d}.mat"
     savemat(out_path, data)
 
 
@@ -169,7 +222,7 @@ def main() -> None:
                     flush=True,
                 )
 
-    print(f"Saved {NUM_SAMPLES} samples to {out_dir.resolve()}")
+    print(f"\nSaved {NUM_SAMPLES} samples to {out_dir.resolve()}")
 
 
 if __name__ == "__main__":
