@@ -75,24 +75,24 @@ class LISTFMConfig:
         Final embedding dimension for CLIP-like output
     """
 
-    img_in_chan: int
-    vision_enc_feat: int
-    vision_enc_pool: int
-    vision_enc_tf_layer: int
-    vision_enc_tf_head: int
-    vision_img_w: int
-    vision_block_type: BlockType
-    text_enc_context: int
-    text_enc_vocab_size: int
-    text_enc_tf_w: int
-    text_enc_tf_layer: int
-    text_enc_tf_head: int
-    text_enc_pretrained: Path | None
-    bottleneck_width: int
-    bottleneck_layer: int
-    bottleneck_head: int
-    tokenizer_bpe: Path
-    clip_emb_dim: int
+    img_in_chan: int  # 1
+    vision_enc_feat: int  # 64
+    vision_enc_pool: int  # 4
+    vision_enc_tf_layer: int  # 12
+    vision_enc_tf_head: int  # 8
+    vision_img_w: int  # 512
+    vision_block_type: BlockType  # 'block3'
+    text_enc_context: int  # 1536
+    text_enc_vocab_size: int  # 49408
+    text_enc_tf_w: int  # 512
+    text_enc_tf_layer: int  # 12
+    text_enc_tf_head: int  # 8
+    text_enc_pretrained: Path | None  # None
+    bottleneck_width: int  # 512
+    bottleneck_layer: int  # 12
+    bottleneck_head: int  # 8
+    tokenizer_bpe: Path  # PosixPath('bpe_simple_vocab_16e6.txt.gz')
+    clip_emb_dim: int  # 512
     vision_dec_feat: int = 16
 
     def to_dict(self) -> dict:
