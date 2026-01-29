@@ -57,7 +57,7 @@ class GeneralConfig:
     save_max_idx: int = 100
 
     # Pretrained
-    pretrained: str = "/home/juhyung/code/fm2026/code_downstream_recon/checkpoint_v2.1.ckpt"
+    pretrained: str = "/fast_storage/intern/code/share/checkpoint_3m.ckpt"
     use_bottleneck: bool = True
     grad_encoder: bool = True
     from_scratch: bool = False
