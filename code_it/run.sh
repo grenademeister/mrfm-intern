@@ -5,8 +5,10 @@ LOG_DATE="/home/$USER_NAME/fm2026/fm_flow/code_it/logs"
 echo "[INFO] Removing nohup.out"
 rm -rf nohup.out
 
-PYTHON_PATH=/home/$USER_NAME/.conda/envs/fm/bin/python
-TENSORBOARD_PATH=/home/$USER_NAME/.conda/envs/fm/bin/tensorboard
+CONDA_ENV_NAME=$CONDA_DEFAULT_ENV
+
+PYTHON_PATH=/home/$USER_NAME/.conda/envs/$CONDA_ENV_NAME/bin/python
+TENSORBOARD_PATH=/home/$USER_NAME/.conda/envs/$CONDA_ENV_NAME/bin/tensorboard
 echo "[INFO] Current directory: $(pwd)"
 
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
