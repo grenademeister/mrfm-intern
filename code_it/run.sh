@@ -1,12 +1,12 @@
 #!/bin/bash
-
-LOG_DATE="/home/intern2/fm2026/fm_flow/code_it/logs"
+USER_NAME=$(whoami)
+LOG_DATE="/home/$USER_NAME/fm2026/fm_flow/code_it/logs"
 
 echo "[INFO] Removing nohup.out"
 rm -rf nohup.out
 
-PYTHON_PATH=/home/intern2/.conda/envs/fm/bin/python
-TENSORBOARD_PATH=/home/intern2/.conda/envs/fm/bin/tensorboard
+PYTHON_PATH=/home/$USER_NAME/.conda/envs/fm/bin/python
+TENSORBOARD_PATH=/home/$USER_NAME/.conda/envs/fm/bin/tensorboard
 echo "[INFO] Current directory: $(pwd)"
 
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
@@ -37,7 +37,7 @@ nohup $PYTHON_PATH train.py \
 
 echo "[INFO] Training started on GPU: $GPU with batch size: $TRAIN_BATCH"
 
-nohup $TENSORBOARD_PATH --logdir /home/intern2/fm2026/fm_flow/code_it/logs > /dev/null 2>&1 &
+nohup $TENSORBOARD_PATH --logdir /home/$USER_NAME/fm2026/fm_flow/code_it/logs > /dev/null 2>&1 &
 echo "[INFO] TensorBoard started."
 
 # sleep 20
