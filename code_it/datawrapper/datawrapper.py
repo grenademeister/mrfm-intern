@@ -44,6 +44,7 @@ class DataKey(IntEnum):
     Label = 1
     Text = 2
     Instruction = 3
+    TaskName = 4
 
 
 @dataclass
@@ -70,6 +71,7 @@ class DataWrapper(Dataset):
     subject_num: int
     train_percent: float
     slice_per_subject: int
+    file_path_list: list[str]
 
     def __init__(
         self,
@@ -87,18 +89,22 @@ class DataWrapper(Dataset):
         super().__init__()
 
         total_list: list[str] = []
+        self.file_path_list = file_path
+        
         for _file_path in file_path:
             files = glob.glob(f"{_file_path}/{data_type}")
             if debug_mode:
                 if split == "train":
-                    total_list += files[:1000]
+                    files = files[:1280]
                 else:
-                    total_list += files[:10]
+                    files = files[:64]
             else:
                 if split == "train":
-                    total_list += files[:10000]
+                    files = files[:10000]
                 else:
-                    total_list += files[:100]
+                    files = files[:200]
+            
+            total_list += files
 
         self.file_list = total_list
         self.training_mode = training_mode
@@ -147,11 +153,20 @@ class DataWrapper(Dataset):
         instruction = _coerce_matlab_text(instruction)
         instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
 
+        # Extract task_name from file path
+        current_file = self.file_list[idx]
+        task_name = "unknown"
+        for base_path in self.file_path_list:
+            if current_file.startswith(base_path):
+                task_name = base_path.rstrip('/').split('/')[-2]
+                break
+
         return (
             input,
             tgt,
             text_token,
             instruction_token,
+            task_name,
         )
 
     def __len__(self) -> int:
@@ -190,6 +205,7 @@ def get_data_wrapper_loader(
         pin_memory=True,
         persistent_workers=True,
         shuffle=loader_cfg.shuffle,
+        drop_last=True,
     )
 
     return (

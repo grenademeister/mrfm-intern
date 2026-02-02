@@ -383,6 +383,7 @@ def test_part_listfm_vision_pretraining(
     save_val: bool,
     test_state: MetricController,
     img_cnt: int,
+    task_states: dict[str, MetricController] | None = None,
 ) -> float:
     loss_func = get_loss_func(config.loss_model)
 
@@ -390,6 +391,7 @@ def test_part_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    task_names: tuple[str, ...] = _data[DataKey.TaskName]
 
     batch_cnt = input.shape[0]
     with torch.no_grad():
@@ -401,11 +403,26 @@ def test_part_listfm_vision_pretraining(
         )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
+    psnr = calculate_psnr(output, label)
+    ssim = calculate_ssim(output, label)
 
+    # Add to overall metrics
     test_state.add("loss", loss)
+    test_state.add("psnr", psnr)
+    test_state.add("ssim", ssim)
 
-    test_state.add("psnr", calculate_psnr(output, label))
-    test_state.add("ssim", calculate_ssim(output, label))
+    # Add to task-specific metrics (per sample in batch)
+    if task_states is not None:
+        for i in range(batch_cnt):
+            task_name = task_names[i]
+            if task_name not in task_states:
+                task_states[task_name] = MetricController()
+                task_states[task_name].reset()
+            
+            # Add metrics for individual sample
+            task_states[task_name].add("loss", loss[i:i+1])
+            task_states[task_name].add("psnr", psnr[i:i+1])
+            task_states[task_name].add("ssim", ssim[i:i+1])
 
     if save_val:
         save_result_to_mat(
@@ -435,6 +452,7 @@ def test_part(
 ) -> float:
     test_state = MetricController()
     test_state.reset()
+    task_states: dict[str, MetricController] = {}
     network.eval()
     model = network
 
@@ -447,10 +465,14 @@ def test_part(
             save_val=save_val and img_cnt <= config.save_max_idx,
             test_state=test_state,
             img_cnt=img_cnt,
+            task_states=task_states,
         )
 
         img_cnt += batch_cnt
 
+    # Log overall metrics
+    logger.info("=" * 80)
+    logger.info("Overall Metrics:")
     log_summary(
         init_time=config.init_time,
         state=test_state,
@@ -459,6 +481,22 @@ def test_part(
         tb_prefix=tb_prefix,
         step=epoch,
     )
+
+    # Log task-specific metrics
+    if task_states:
+        logger.info("=" * 80)
+        logger.info("Task-specific Metrics:")
+        for task_name in sorted(task_states.keys()):
+            logger.info(f"--- {task_name} ---")
+            log_summary(
+                init_time=config.init_time,
+                state=task_states[task_name],
+                log_std=True,
+                tb_writer=tb_writer,
+                tb_prefix=f"{tb_prefix}/{task_name}",
+                step=epoch,
+            )
+        logger.info("=" * 80)
 
     primary_metric = test_state.mean("psnr")
     return primary_metric
