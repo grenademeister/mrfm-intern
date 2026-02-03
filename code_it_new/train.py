@@ -177,6 +177,14 @@ class Trainer:
         self,
     ) -> None:
 
+        if config.parallel:
+            self.network = self.network.to(config.device)
+            self._initialize_lazy_modules()
+            self.network = torch.nn.DataParallel(self.network)
+        else:
+            self.network = self.network.to(config.device)
+            self._initialize_lazy_modules()
+
         self.optims = [
             get_optim(
                 network=self.network,
@@ -184,10 +192,36 @@ class Trainer:
             ),
         ]
 
-        if config.parallel:
-            self.network = torch.nn.DataParallel(self.network).to(config.device)
-        else:
-            self.network = self.network.to(config.device)
+    def _initialize_lazy_modules(self) -> None:
+        if ModelType.from_string(config.model_type) != ModelType.LISTFM_IT:
+            return
+        if not hasattr(self.network, "vision_decoder"):
+            return
+
+        img_size = min(64, int(self.network.listfmconfig.vision_img_w))
+        img_ch = int(self.network.listfmconfig.img_in_chan)
+        text_len = min(16, int(self.network.listfmconfig.text_enc_context))
+        vocab = int(self.network.listfmconfig.text_enc_vocab_size)
+
+        img = torch.randn(1, img_ch, img_size, img_size, device=config.device)
+        text = torch.randint(0, vocab, (1, text_len), device=config.device)
+        flow_xt = torch.randn(1, img_ch, img_size, img_size, device=config.device)
+        flow_t = torch.rand(1, 1, device=config.device)
+
+        was_training = self.network.training
+        self.network.eval()
+        with torch.no_grad():
+            _ = self.network(
+                img=img,
+                text=text,
+                instruction=None,
+                use_bottleneck=False,
+                grad_encoder=False,
+                flow_xt=flow_xt,
+                flow_t=flow_t,
+            )
+        if was_training:
+            self.network.train()
 
     @error_wrap
     def _train(

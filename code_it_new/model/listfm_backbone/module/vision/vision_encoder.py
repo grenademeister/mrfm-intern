@@ -1,135 +1,98 @@
+import math
+
 import torch
 from torch import nn
-
-from ..transformer import LayerNorm, Transformer
-from .conv_block import BlockType, get_time_conv_attention_block
+from transformers import AutoImageProcessor, AutoModel
 
 
-class ConvBlock(nn.Module):
+def get_patch_tokens(
+    last_hidden_state: torch.Tensor,
+    num_register_tokens: int = 0,
+) -> torch.Tensor:
+    _, tokens, _ = last_hidden_state.shape
+    tokens_minus_special = tokens - (1 + num_register_tokens)
+    grid_minus = int(math.sqrt(tokens_minus_special))
+    if grid_minus * grid_minus == tokens_minus_special:
+        start = 1 + num_register_tokens
+        return last_hidden_state[:, start:, :]
+
+    tokens_minus_cls = tokens - 1
+    grid_minus_cls = int(math.sqrt(tokens_minus_cls))
+    if grid_minus_cls * grid_minus_cls == tokens_minus_cls:
+        return last_hidden_state[:, 1:, :]
+
+    grid_full = int(math.sqrt(tokens))
+    if grid_full * grid_full == tokens:
+        return last_hidden_state
+
+    raise ValueError(f"Unexpected token count: {tokens}")
+
+
+class VisionEncoder(nn.Module):
     def __init__(
         self,
-        in_chans: int,
-        out_chans: int,
-        block_type: BlockType,
+        model_name: str = "facebook/dinov3-vitb16-pretrain-lvd1689m",
+        finetune_encoder: bool = True,
+        input_size: int | None = None,
+        input_is_normalized: bool = True,
     ) -> None:
         super().__init__()
 
-        self.layers = get_time_conv_attention_block(
-            block_type=block_type,
-            in_chans=in_chans,
-            out_chans=out_chans,
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
+        self.encoder = AutoModel.from_pretrained(model_name)
+        for param in self.encoder.parameters():
+            param.requires_grad = finetune_encoder
+        if not finetune_encoder:
+            self.encoder.eval()
+
+        self.input_size = input_size
+        self.input_is_normalized = input_is_normalized
+
+    def _prepare_inputs(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        if x.dim() != 4:
+            raise NotImplementedError("x dim should be 4")
+
+        if x.shape[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+        elif x.shape[1] == 2:
+            x = torch.cat([x, x[:, :1]], dim=1)
+        elif x.shape[1] != 3:
+            raise ValueError(f"Expected 1, 2, or 3 channels, got {x.shape[1]}")
+
+        kwargs = {}
+        kwargs["do_resize"] = False
+        if self.input_is_normalized:
+            kwargs["do_rescale"] = False
+            kwargs["do_normalize"] = False
+        inputs = self.processor(
+            images=x,
+            return_tensors="pt",
+            input_data_format="channels_first",
+            **kwargs,
         )
+        pixel_values = inputs["pixel_values"].to(device=x.device, dtype=x.dtype)
+        return pixel_values
 
     def forward(
         self,
         x: torch.Tensor,
     ) -> torch.Tensor:
-        return self.layers(x)
-
-
-def create_down_sample_layers(
-    in_chans: int,
-    chans: int,
-    num_pool_layers: int,
-    block_type: BlockType,
-) -> nn.ModuleList:
-    layers = nn.ModuleList([ConvBlock(in_chans, chans, block_type)])
-    ch = chans
-    for _ in range(num_pool_layers - 1):
-        layers.append(ConvBlock(ch, ch * 2, block_type))
-        ch *= 2
-    return layers
-
-
-class VisionEncoder(nn.Module):
-    in_chans: int
-    num_pool_layers: int
-    down_sample_layers: nn.ModuleList
-    transformer: Transformer
-
-    def __init__(
-        self,
-        in_chans: int = 2,
-        feature_chans: int = 64,
-        num_pool_layers: int = 5,
-        transformer_layers: int = 12,
-        transformer_n_head: int = 8,
-        image_width: int = 512,
-        output_dim: int = 512,
-        block_type: BlockType = BlockType.BLOCK3,
-    ) -> None:
-        super().__init__()
-
-        self.in_chans = in_chans
-        self.num_pool_layers = num_pool_layers
-
-        self.embed_dim = feature_chans * (2 ** (num_pool_layers - 1))
-        self.embed_w = image_width // (2 ** (num_pool_layers))
-
-        self.down_sample_layers = create_down_sample_layers(
-            in_chans=in_chans,
-            chans=feature_chans,
-            num_pool_layers=num_pool_layers,
-            block_type=block_type,
-        )
-
-        self.transformer = Transformer(
-            width=self.embed_dim,
-            layers=transformer_layers,
-            heads=transformer_n_head,
-            attn_mask=None,
-        )
-
-        scale = self.embed_dim**-0.5
-        self.class_embedding = nn.Parameter(scale * torch.randn(self.embed_dim))
-        self.positional_embedding = nn.Parameter(scale * torch.randn(1, self.embed_w**2 + 1, self.embed_dim))
-        self.ln_pre = LayerNorm(self.embed_dim)
-        self.ln_post = LayerNorm(self.embed_dim)
-        self.proj = nn.Parameter(scale * torch.randn(self.embed_dim, output_dim))
-
-    def forward(
-        self,
-        x: torch.Tensor,
-    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
-        x_dim = x.dim()
-        if x_dim != 4:
-            raise NotImplementedError("x dim should be 4")
-
-        stack: list[torch.Tensor] = []
-        output = x
-
-        # Down-sampling
-        for layer in self.down_sample_layers:
-            output = layer(output)
-            stack.append(output)
-            output = torch.nn.functional.max_pool2d(output, kernel_size=2)
-
-        # Transformer
-        B, C, _, _ = output.shape
-
-        output = output.reshape(B, C, -1)
-        output = output.permute(0, 2, 1)
-
-        class_token = self.class_embedding.to(output.dtype).expand(B, 1, -1)
-        output = torch.cat([class_token, output], dim=1)
-
-        output = output + self.positional_embedding[:, : output.shape[1], :].to(output.device)
-        output = self.ln_pre(output)
-
-        output = self.transformer(output)
-        full_feature = output
-
-        output = self.ln_post(output[:, 0, :])
-        output = output @ self.proj
-
-        return output, full_feature, stack
+        pixel_values = self._prepare_inputs(x)
+        outputs = self.encoder(pixel_values)
+        num_register_tokens = getattr(self.encoder.config, "num_register_tokens", 0)
+        patch_tokens = get_patch_tokens(outputs.last_hidden_state, num_register_tokens)
+        batch, tokens, dim = patch_tokens.shape
+        grid = int(math.sqrt(tokens))
+        if grid * grid != tokens:
+            raise ValueError(f"Patch tokens do not form a square grid: {tokens}")
+        return patch_tokens.reshape(batch, grid, grid, dim)
 
 
 if __name__ == "__main__":
     model = VisionEncoder()
     x = torch.randn(2, 2, 512, 512)
-    out, full_feature, stack = model(x)
+    out = model(x)
     print(f"out shape: {out.shape}")
-    print(f"full_feature shape: {full_feature.shape}")
-    for i, s in enumerate(stack):
-        print(f"stack[{i}] shape: {s.shape}")

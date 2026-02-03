@@ -162,14 +162,10 @@ class LISTFoundationModelBackbone(torch.nn.Module):
         self.listfmconfig = listfmconfig
 
         self.vision_encoder = VisionEncoder(
-            in_chans=listfmconfig.img_in_chan,
-            feature_chans=listfmconfig.vision_enc_feat,
-            num_pool_layers=listfmconfig.vision_enc_pool,
-            transformer_layers=listfmconfig.vision_enc_tf_layer,
-            transformer_n_head=listfmconfig.vision_enc_tf_head,
-            image_width=listfmconfig.vision_img_w,
-            output_dim=listfmconfig.clip_emb_dim,
-            block_type=listfmconfig.vision_block_type,
+            model_name="facebook/dinov3-vitb16-pretrain-lvd1689m",
+            finetune_encoder=True,
+            input_size=None,
+            input_is_normalized=True,
         )
 
         self.text_encoder = TextEncoder(
@@ -225,18 +221,42 @@ class LISTFoundationModelBackbone(torch.nn.Module):
             logger.debug("Head check success")
         else:
             raise ValueError("Witch % Head had to be 0")
-
         if listfmconfig.tokenizer_bpe:
-            if os.path.exists(os.path.join(os.path.dirname(__file__), "module", "tokenizer", listfmconfig.tokenizer_bpe)):
+            bpe_path = listfmconfig.tokenizer_bpe
+            if not os.path.isabs(bpe_path):
+                module_bpe = os.path.join(
+                    os.path.dirname(__file__),
+                    "module",
+                    "tokenizer",
+                    bpe_path,
+                )
+                repo_bpe = os.path.join(os.getcwd(), bpe_path)
+                if os.path.exists(module_bpe):
+                    bpe_path = module_bpe
+                elif os.path.exists(repo_bpe):
+                    bpe_path = repo_bpe
+            if os.path.exists(bpe_path):
                 logger.debug("BPE file exists.")
+                listfmconfig.tokenizer_bpe = bpe_path
             else:
                 raise FileNotFoundError(f"BPE file not found: {listfmconfig.tokenizer_bpe}")
 
         if listfmconfig.text_enc_pretrained:
-            if os.path.exists(os.path.join(os.path.dirname(__file__), "module", listfmconfig.text_enc_pretrained)):
+            pretrained_path = listfmconfig.text_enc_pretrained
+            if not os.path.isabs(pretrained_path):
+                module_pretrained = os.path.join(os.path.dirname(__file__), "module", pretrained_path)
+                repo_pretrained = os.path.join(os.getcwd(), pretrained_path)
+                if os.path.exists(module_pretrained):
+                    pretrained_path = module_pretrained
+                elif os.path.exists(repo_pretrained):
+                    pretrained_path = repo_pretrained
+            if os.path.exists(pretrained_path):
                 logger.debug("Text encoder pretrained model file exists.")
+                listfmconfig.text_enc_pretrained = pretrained_path
             else:
-                raise FileNotFoundError(f"Text encoder pretrained model file not found: {listfmconfig.text_enc_pretrained}")
+                raise FileNotFoundError(
+                    f"Text encoder pretrained model file not found: {listfmconfig.text_enc_pretrained}"
+                )
 
     @staticmethod
     def _pad_square(
@@ -321,12 +341,10 @@ class LISTFoundationModelBackbone(torch.nn.Module):
         Returns img_full_feature: Tensor (B, N, D), stack_feature: list[Tensor]
         """
         img = self._preprocess_image(img)
-        _, img_full_feature, stack_feature = self.vision_encoder(x=img)
+        img_full_feature = self.vision_encoder(x=img)
 
-        validate_tensor_dimensions([img_full_feature], 3)
-        if len(stack_feature) != self.listfmconfig.vision_enc_pool:
-            raise ValueError(f"Stack feature must have length {self.listfmconfig.vision_enc_pool}, got {len(stack_feature)}")
-        return img_full_feature, stack_feature
+        validate_tensor_dimensions([img_full_feature], 4)
+        return img_full_feature, []
 
     def encode_text(
         self,
@@ -366,6 +384,8 @@ class LISTFoundationModelBackbone(torch.nn.Module):
     ) -> torch.Tensor:
         if self.vision_decoder is None:
             raise RuntimeError("Vision decoder not enabled.")
+        if img_feat.dim() != 3:
+            raise ValueError("VisionDecoder expects 3D (B, N, D) features.")
         if flow_xt is None:
             flow_xt = torch.randn(
                 img_feat.shape[0],
@@ -414,7 +434,7 @@ class LISTFoundationModelBackbone(torch.nn.Module):
             text=text,
         )
 
-        if use_backbone:
+        if use_backbone and img_full_feature.dim() == 3:
             img_full_feature, text_full_feature = self.fuse_modalities(
                 img_feat=img_full_feature,
                 text_feat=text_full_feature,
@@ -445,8 +465,8 @@ class LISTFoundationModelBackbone(torch.nn.Module):
             text_full_feature,
             _stack_feature,
         ) = self.inference(img=img, text=text)
-        logger.debug(f"img_full_feature size: {img_full_feature.shape}")  # (B, 1025, 512)
-        logger.debug(f"text_full_feature size: {text_full_feature.shape}")  # (B, 1536, 512)
+        logger.debug(f"img_full_feature size: {img_full_feature.shape}")
+        logger.debug(f"text_full_feature size: {text_full_feature.shape}")
         logger.debug(
             f"img mean std max min: {img_full_feature.mean().item():.4f} {img_full_feature.std().item():.4f} {img_full_feature.max().item():.4f} {img_full_feature.min().item():.4f}"  # noqa: E501
         )
@@ -456,7 +476,7 @@ class LISTFoundationModelBackbone(torch.nn.Module):
         for i, stack_f in enumerate(_stack_feature):
             logger.debug(f"stack_feature[{i}] size: {stack_f.shape}")
 
-        if self.vision_decoder is not None:
+        if self.vision_decoder is not None and img_full_feature.dim() == 3:
             recon_img = self.decode_image(
                 img_feat=img_full_feature,
                 stack=_stack_feature.copy(),

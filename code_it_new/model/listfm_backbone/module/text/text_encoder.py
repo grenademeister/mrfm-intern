@@ -78,10 +78,15 @@ class TextEncoder(nn.Module):
 
         self.load_state_dict(model_state_dict, strict=True)
 
-    def build_attention_mask(self) -> torch.Tensor:
+    def build_attention_mask(
+        self,
+        context_length: int | None = None,
+    ) -> torch.Tensor:
         # lazily create causal attention mask, with full attention between the vision tokens
         # pytorch uses additive attention mask; fill with -inf
-        mask = torch.empty(self.context_length, self.context_length)
+        if context_length is None:
+            context_length = self.context_length
+        mask = torch.empty(context_length, context_length)
         mask.fill_(float("-inf"))
         mask.triu_(1)  # zero out the lower diagonal
         return mask
@@ -90,8 +95,20 @@ class TextEncoder(nn.Module):
         self,
         text: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if text.dim() != 2:
+            raise ValueError("text must be a 2D (B, L) tensor.")
+
+        context_length = text.shape[1]
+        if context_length > self.context_length:
+            text = text[:, : self.context_length]
+            context_length = self.context_length
+
         x = self.token_embedding(text).type(torch.float32)
-        x = x + self.positional_embedding.type(torch.float32)
+        x = x + self.positional_embedding[:context_length].type(torch.float32)
+
+        attn_mask = self.build_attention_mask(context_length).to(x.device)
+        for block in self.transformer.resblocks:
+            block.attn_mask = attn_mask
 
         x = self.transformer(x)
         x = self.ln_final(x).type(torch.float32)

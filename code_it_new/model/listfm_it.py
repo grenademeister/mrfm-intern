@@ -46,17 +46,16 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 decoder_feature_chans=listfmconfig.vision_dec_feat,
                 num_pool_layers=listfmconfig.vision_enc_pool,
                 image_width=listfmconfig.vision_img_w,
-                block_type=listfmconfig.vision_block_type,
-                instruction_dim=listfmconfig.clip_emb_dim,
+                instruction_dim=listfmconfig.text_enc_tf_w,
                 input_chans=listfmconfig.img_in_chan,
             )
             self.instruction_encoder = TextEncoder(
                 embed_dim=listfmconfig.clip_emb_dim,
-                context_length=64,
+                context_length=listfmconfig.text_enc_context,
                 vocab_size=listfmconfig.text_enc_vocab_size,
                 transformer_width=listfmconfig.text_enc_tf_w,
                 transformer_heads=listfmconfig.text_enc_tf_head,
-                transformer_layers=listfmconfig.text_enc_tf_head,
+                transformer_layers=listfmconfig.text_enc_tf_layer,
                 pretrained_model_weights=listfmconfig.text_enc_pretrained,
             )
 
@@ -75,14 +74,18 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
         validate_tensor_dimensions([text], 2)
         validate_tensor_channels(img, self.listfmconfig.img_in_chan)
 
-        instruction_copied = instruction
-        instruction_copied = F.pad(
-            instruction_copied,
-            (0, self.listfmconfig.text_enc_context - instruction_copied.shape[1]),
-        )
-
         text_ctx = torch.no_grad() if not grad_encoder else nullcontext()
         text_full_feature = None
+        context_length = self.instruction_encoder.context_length
+
+        def _pad_or_truncate(tokens: Tensor) -> Tensor:
+            if tokens.shape[1] > context_length:
+                return tokens[:, :context_length]
+            if tokens.shape[1] < context_length:
+                return F.pad(tokens, (0, context_length - tokens.shape[1]))
+            return tokens
+
+        text = _pad_or_truncate(text)
         if instruction is None:
             with text_ctx:
                 (
@@ -99,6 +102,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             torch.int64,
             torch.uint8,
         }:
+            instruction = _pad_or_truncate(instruction)
             with text_ctx:
                 (
                     _instruction_features,
@@ -111,42 +115,13 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
         img = self._preprocess_image(img=img)
         if not grad_encoder:
             with torch.no_grad():
-                (
-                    _img_feature,
-                    img_full_feature,
-                    stack_feature,
-                ) = self.vision_encoder(
-                    x=img,
-                )
+                img_full_feature = self.vision_encoder(x=img)
         else:
-            (
-                _img_feature,
-                img_full_feature,
-                stack_feature,
-            ) = self.vision_encoder(
-                x=img,
-            )
-
-        if use_bottleneck:
-            if text_full_feature is None:
-                with text_ctx:
-                    (
-                        _text_features,
-                        text_full_feature,
-                    ) = self.text_encoder(
-                        text=instruction_copied,
-                    )
-            (
-                img_full_feature,
-                _text_full_feature,
-            ) = self.bottleneck(
-                vision_feature=img_full_feature,
-                text_feature=text_full_feature,
-            )
+            img_full_feature = self.vision_encoder(x=img)
 
         img_decode = self.vision_decoder(
             x=img_full_feature,
-            stack_feat=stack_feature,
+            stack_feat=[],
             instruction=instruction,
             flow_xt=flow_xt,
             flow_t=flow_t,
