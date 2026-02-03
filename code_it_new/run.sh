@@ -1,6 +1,6 @@
 #!/bin/bash
 USER_NAME=$(whoami)
-LOG_DATE="/home/$USER_NAME/fm2026/fm_flow/code_it/logs"
+LOG_DATE="/home/$USER_NAME/fm2026/fm_flow/code_it_new/logs"
 
 echo "[INFO] Removing nohup.out"
 rm -rf nohup.out
@@ -40,7 +40,7 @@ nohup $PYTHON_PATH train.py \
 
 echo "[INFO] Training started on GPU: $GPU with batch size: $TRAIN_BATCH"
 
-nohup $TENSORBOARD_PATH --logdir /home/$USER_NAME/fm2026/fm_flow/code_it/logs > /dev/null 2>&1 &
+nohup $TENSORBOARD_PATH --logdir /home/$USER_NAME/fm2026/fm_flow/code_it_new/logs > /dev/null 2>&1 &
 echo "[INFO] TensorBoard started."
 
 # sleep 20
