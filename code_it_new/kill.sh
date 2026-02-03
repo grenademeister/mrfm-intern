@@ -1,44 +1,32 @@
 #!/bin/bash
+USER_NAME=$(whoami)
 
-echo "[INFO] Searching for running train.py processes..."
+echo "[INFO] Searching for running train.py processes owned by $USER_NAME..."
 
-PIDS=$(ps -ef | grep train.py | grep -v grep | awk '{print $2}')
+TRAIN_PIDS=$(ps -u $USER_NAME -f | grep train.py | grep -v grep | awk '{print $2}')
 
-if [ -z "$PIDS" ]; then
+if [ -z "$TRAIN_PIDS" ]; then
     echo "[INFO] No train.py processes found."
 else
-    echo "[INFO] Found the following train.py process IDs: $PIDS"
-    for pid in $PIDS; do
+    echo "[INFO] Found the following train.py process IDs: $TRAIN_PIDS"
+    for pid in $TRAIN_PIDS; do
         echo "[INFO] Killing process ID: $pid"
         kill -9 $pid
     done
-    echo "[INFO] All train.py processes have been terminated."
+    echo "[INFO] All train.py processes owned by $USER_NAME have been terminated."
 fi
 
+echo "[INFO] Searching for running tensorboard processes owned by $USER_NAME..."
 
-PIDS=$(ps -ef | grep test_wholebrain.py | grep -v grep | awk '{print $2}')
+TB_PIDS=$(ps -u $USER_NAME -f | grep tensorboard | grep -v grep | awk '{print $2}')
 
-if [ -z "$PIDS" ]; then
-    echo "[INFO] No test_wholebrain.py processes found."
+if [ -z "$TB_PIDS" ]; then
+    echo "[INFO] No tensorboard processes found."
 else
-    echo "[INFO] Found the following test_wholebrain.py process IDs: $PIDS"
-    for pid in $PIDS; do
+    echo "[INFO] Found the following tensorboard process IDs: $TB_PIDS"
+    for pid in $TB_PIDS; do
         echo "[INFO] Killing process ID: $pid"
         kill -9 $pid
     done
-    echo "[INFO] All test_wholebrain.py processes have been terminated."
-fi
-
-
-PIDS=$(ps -ef | grep test_raw.py | grep -v grep | awk '{print $2}')
-
-if [ -z "$PIDS" ]; then
-    echo "[INFO] No test_raw.py processes found."
-else
-    echo "[INFO] Found the following test_raw.py process IDs: $PIDS"
-    for pid in $PIDS; do
-        echo "[INFO] Killing process ID: $pid"
-        kill -9 $pid
-    done
-    echo "[INFO] All test_raw.py processes have been terminated."
+    echo "[INFO] All tensorboard processes owned by $USER_NAME have been terminated."
 fi

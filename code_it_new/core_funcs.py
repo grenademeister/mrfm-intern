@@ -2,6 +2,7 @@ import math
 import os
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
@@ -19,6 +20,9 @@ from components.metriccontroller import MetricController
 from datawrapper.datawrapper import DataKey
 from model.listfm_it import LISTFoundationModelIT
 from params import config
+
+if TYPE_CHECKING:
+    from torch.utils.tensorboard import SummaryWriter
 
 NETWORK = LISTFoundationModelIT | torch.nn.DataParallel[LISTFoundationModelIT]
 OPTIM = Adam | AdamW
@@ -75,9 +79,10 @@ def make_flow_pair(
     label: Tensor,
     t: Tensor,
 ) -> tuple[Tensor, Tensor]:
-    x0 = torch.randn_like(label) * config.flow_noise_std
-    xt = (1.0 - t) * x0 + t * label
-    return x0, xt
+    x0 = torch.randn_like(label) * config.flow_noise_std  # noise
+    xt = (1.0 - t) * x0 + t * label  # noisy z
+    v = label - x0  # velocity
+    return v, xt
 
 
 def _rectified_flow_sample_dep(
@@ -202,15 +207,23 @@ def log_summary(
     init_time: float,
     state: MetricController,
     log_std: bool = False,
+    tb_writer: "SummaryWriter | None" = None,
+    tb_prefix: str | None = None,
+    step: int | None = None,
 ) -> None:
     spend_time = seconds_to_dhms(time.time() - init_time)
     for key in state.state_dict:
         if log_std:
             summary = f"{spend_time} | {key}: {state.mean(key):0.3e} + {state.std(key):0.3e} "
             logger.info(summary)
+            if tb_writer is not None and tb_prefix is not None and step is not None:
+                tb_writer.add_scalar(f"{tb_prefix}/{key}", state.mean(key), step)
+                tb_writer.add_scalar(f"{tb_prefix}/{key}_std", state.std(key), step)
         else:
             summary = f"{spend_time} | {key}: {state.mean(key):0.3e}"
             logger.info(summary)
+            if tb_writer is not None and tb_prefix is not None and step is not None:
+                tb_writer.add_scalar(f"{tb_prefix}/{key}", state.mean(key), step)
 
 
 def save_checkpoint(
@@ -283,7 +296,7 @@ def train_epoch_listfm_vision_pretraining(
     network: NETWORK,
     epoch: int,
     train_state: MetricController,
-) -> int:
+) -> tuple[int, float]:
     loss_func = get_loss_func(config.loss_model)
 
     input: Tensor = _data[DataKey.Input].to(config.device)
@@ -293,7 +306,7 @@ def train_epoch_listfm_vision_pretraining(
     img_cnt_minibatch = input.shape[0]
 
     flow_t = sample_flow_t(batch=img_cnt_minibatch, device=config.device)
-    flow_x0, flow_xt = make_flow_pair(label=label, t=flow_t)
+    flow_v, flow_xt = make_flow_pair(label=label, t=flow_t)
 
     output = network.forward(
         img=input,
@@ -304,13 +317,14 @@ def train_epoch_listfm_vision_pretraining(
         flow_xt=flow_xt,
         flow_t=flow_t.view(img_cnt_minibatch, 1),
     )
-
+    # pred_v = (output - flow_xt) / (1.0 - flow_t).clamp_min(config.flow_eval_eps)
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
 
-    torch.mean(loss).backward()
+    loss_mean = torch.mean(loss)
+    loss_mean.backward()
     train_state.add("loss", loss)
 
-    return img_cnt_minibatch
+    return img_cnt_minibatch, float(loss_mean.detach().cpu().item())
 
 
 def train_epoch(
@@ -319,6 +333,8 @@ def train_epoch(
     network: NETWORK,
     optim_list: list[OPTIM | None],
     epoch: int,
+    tb_writer: "SummaryWriter | None" = None,
+    tb_log_batch: bool = False,
 ) -> None:
     train_state = MetricController()
     train_state.reset()
@@ -326,9 +342,10 @@ def train_epoch(
 
     logging_cnt: int = 1
     img_cnt: int = 0
-    for _data in train_loader:
+    total_batches = len(train_loader)
+    for batch_idx, _data in enumerate(train_loader):
         zero_optimizers(optim_list=optim_list)
-        img_cnt_minibatch = train_epoch_listfm_vision_pretraining(
+        img_cnt_minibatch, loss_mean = train_epoch_listfm_vision_pretraining(
             _data=_data,
             network=network,
             epoch=epoch,
@@ -336,12 +353,27 @@ def train_epoch(
         )
 
         step_optimizers(optim_list=optim_list)
+        if tb_writer is not None and tb_log_batch:
+            step = epoch * total_batches + batch_idx
+            tb_writer.add_scalar("train/loss_batch", loss_mean, step)
         img_cnt += img_cnt_minibatch
         if img_cnt > (train_len / config.logging_density * logging_cnt):
-            log_summary(init_time=config.init_time, state=train_state)
+            log_summary(
+                init_time=config.init_time,
+                state=train_state,
+                tb_writer=tb_writer,
+                tb_prefix="train",
+                step=epoch,
+            )
             logging_cnt += 1
 
-    log_summary(init_time=config.init_time, state=train_state)
+    log_summary(
+        init_time=config.init_time,
+        state=train_state,
+        tb_writer=tb_writer,
+        tb_prefix="train",
+        step=epoch,
+    )
 
 
 def test_part_listfm_vision_pretraining(
@@ -351,6 +383,7 @@ def test_part_listfm_vision_pretraining(
     save_val: bool,
     test_state: MetricController,
     img_cnt: int,
+    task_states: dict[str, MetricController] | None = None,
 ) -> float:
     loss_func = get_loss_func(config.loss_model)
 
@@ -358,6 +391,7 @@ def test_part_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    task_names: tuple[str, ...] = _data[DataKey.TaskName]
 
     batch_cnt = input.shape[0]
     with torch.no_grad():
@@ -369,11 +403,26 @@ def test_part_listfm_vision_pretraining(
         )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
+    psnr = calculate_psnr(output, label)
+    ssim = calculate_ssim(output, label)
 
+    # Add to overall metrics
     test_state.add("loss", loss)
+    test_state.add("psnr", psnr)
+    test_state.add("ssim", ssim)
 
-    test_state.add("psnr", calculate_psnr(output, label))
-    test_state.add("ssim", calculate_ssim(output, label))
+    # Add to task-specific metrics (per sample in batch)
+    if task_states is not None:
+        for i in range(batch_cnt):
+            task_name = task_names[i]
+            if task_name not in task_states:
+                task_states[task_name] = MetricController()
+                task_states[task_name].reset()
+            
+            # Add metrics for individual sample
+            task_states[task_name].add("loss", loss[i:i+1])
+            task_states[task_name].add("psnr", psnr[i:i+1])
+            task_states[task_name].add("ssim", ssim[i:i+1])
 
     if save_val:
         save_result_to_mat(
@@ -383,6 +432,8 @@ def test_part_listfm_vision_pretraining(
                 "input": input,
                 "out": output,
                 "label": label,
+                "text": text,
+                "instruction": instruction,
             },
             img_cnt=img_cnt,
         )
@@ -396,11 +447,14 @@ def test_part(
     network: NETWORK,
     run_dir: Path,
     save_val: bool,
+    tb_writer: "SummaryWriter | None" = None,
+    tb_prefix: str = "valid",
 ) -> float:
     test_state = MetricController()
     test_state.reset()
+    task_states: dict[str, MetricController] = {}
     network.eval()
-    model = network.module if isinstance(network, torch.nn.DataParallel) else network
+    model = network
 
     img_cnt: int = 0
     for _data in data_loader:
@@ -411,11 +465,38 @@ def test_part(
             save_val=save_val and img_cnt <= config.save_max_idx,
             test_state=test_state,
             img_cnt=img_cnt,
+            task_states=task_states,
         )
 
         img_cnt += batch_cnt
 
-    log_summary(init_time=config.init_time, state=test_state, log_std=True)
+    # Log overall metrics
+    logger.info("=" * 80)
+    logger.info("Overall Metrics:")
+    log_summary(
+        init_time=config.init_time,
+        state=test_state,
+        log_std=True,
+        tb_writer=tb_writer,
+        tb_prefix=tb_prefix,
+        step=epoch,
+    )
+
+    # Log task-specific metrics
+    if task_states:
+        logger.info("=" * 80)
+        logger.info("Task-specific Metrics:")
+        for task_name in sorted(task_states.keys()):
+            logger.info(f"--- {task_name} ---")
+            log_summary(
+                init_time=config.init_time,
+                state=task_states[task_name],
+                log_std=True,
+                tb_writer=tb_writer,
+                tb_prefix=f"{tb_prefix}/{task_name}",
+                step=epoch,
+            )
+        logger.info("=" * 80)
 
     primary_metric = test_state.mean("psnr")
     return primary_metric

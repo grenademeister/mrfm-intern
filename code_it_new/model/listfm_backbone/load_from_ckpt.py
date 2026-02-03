@@ -71,6 +71,7 @@ def load_from_ckpt(  # noqa: C901
             new_key = key[7:]
 
         if new_key.split(".")[0] in [
+            "vision_encoder",
             "text_encoder",
             "bottleneck",
         ]:

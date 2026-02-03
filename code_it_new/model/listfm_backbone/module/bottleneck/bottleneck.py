@@ -1,5 +1,4 @@
 import torch
-from torch.nn import functional as F
 from torch import nn
 
 from ..transformer import LayerNorm, Transformer
@@ -38,12 +37,7 @@ class Bottleneck(nn.Module):
         )
 
         x = torch.cat((vision_feature, text_feature), dim=1)
-        pos = self.positional_embedding.type(torch.float32)
-        if pos.shape[0] != x.shape[1]:
-            pos = pos.unsqueeze(0).transpose(1, 2)
-            pos = F.interpolate(pos, size=x.shape[1], mode="linear", align_corners=False)
-            pos = pos.transpose(1, 2).squeeze(0)
-        x = x + pos
+        x = x + self.positional_embedding.type(torch.float32)
         x = self.transformer(x)
         x = self.ln_final(x).type(torch.float32)
         vision_output = x[:, : vision_feature.shape[1], :]

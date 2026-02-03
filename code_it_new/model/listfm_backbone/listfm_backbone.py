@@ -75,24 +75,24 @@ class LISTFMConfig:
         Final embedding dimension for CLIP-like output
     """
 
-    img_in_chan: int
-    vision_enc_feat: int
-    vision_enc_pool: int
-    vision_enc_tf_layer: int
-    vision_enc_tf_head: int
-    vision_img_w: int
-    vision_block_type: BlockType
-    text_enc_context: int
-    text_enc_vocab_size: int
-    text_enc_tf_w: int
-    text_enc_tf_layer: int
-    text_enc_tf_head: int
-    text_enc_pretrained: Path | None
-    bottleneck_width: int
-    bottleneck_layer: int
-    bottleneck_head: int
-    tokenizer_bpe: Path
-    clip_emb_dim: int
+    img_in_chan: int  # 1
+    vision_enc_feat: int  # 64
+    vision_enc_pool: int  # 4
+    vision_enc_tf_layer: int  # 12
+    vision_enc_tf_head: int  # 8
+    vision_img_w: int  # 512
+    vision_block_type: BlockType  # 'block3'
+    text_enc_context: int  # 1536
+    text_enc_vocab_size: int  # 49408
+    text_enc_tf_w: int  # 512
+    text_enc_tf_layer: int  # 12
+    text_enc_tf_head: int  # 8
+    text_enc_pretrained: Path | None  # None
+    bottleneck_width: int  # 512
+    bottleneck_layer: int  # 12
+    bottleneck_head: int  # 8
+    tokenizer_bpe: Path  # PosixPath('bpe_simple_vocab_16e6.txt.gz')
+    clip_emb_dim: int  # 512
     vision_dec_feat: int = 16
 
     def to_dict(self) -> dict:
@@ -433,20 +433,20 @@ class LISTFoundationModelBackbone(torch.nn.Module):
             self.listfmconfig.img_in_chan,
             self.listfmconfig.vision_img_w,
             self.listfmconfig.vision_img_w,
-        )
+        )  # (B, 1, 512, 512)
         text = self.tokenizer.tokenize(
             texts=["a dog", "a cat"],
             context_length=self.listfmconfig.text_enc_context,
         )
-        logger.debug(f"Image size: {img.shape}")
-        logger.debug(f"Text size: {text.shape}")
+        logger.debug(f"Image size: {img.shape}")  # (B, 1, 512, 512)
+        logger.debug(f"Text size: {text.shape}")  # (B, 1536)
         (
             img_full_feature,
             text_full_feature,
             _stack_feature,
         ) = self.inference(img=img, text=text)
-        logger.debug(f"img_full_feature size: {img_full_feature.shape}")
-        logger.debug(f"text_full_feature size: {text_full_feature.shape}")
+        logger.debug(f"img_full_feature size: {img_full_feature.shape}")  # (B, 1025, 512)
+        logger.debug(f"text_full_feature size: {text_full_feature.shape}")  # (B, 1536, 512)
         logger.debug(
             f"img mean std max min: {img_full_feature.mean().item():.4f} {img_full_feature.std().item():.4f} {img_full_feature.max().item():.4f} {img_full_feature.min().item():.4f}"  # noqa: E501
         )
