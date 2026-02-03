@@ -7,7 +7,7 @@ from typing import Literal
 import torch
 from params_data import TEST_DATASET, TRAIN_DATASET, VALID_DATASET
 
-default_run_dir: str = "/home/intern2/fm2026/fm_flow/logs"
+default_run_dir: str = "/home/intern2/fm2026/mrfm-intern/code_it_new/logs"
 RUN_DIR: str = os.environ.get("RUN_DIR", default_run_dir)
 
 

@@ -48,7 +48,7 @@ Brief guide to the training pipeline and key modules:
 # Useful information
 This codebase is using conda for environment management, so use `/home/intern2/.conda/envs/fm/bin/python` to execute python.
 Packages like torch and numpy are already installed.
-Current directory is `/home/intern2/fm2026/fm_flow/code_it`, and most of the data are in `/fast_storage/intern/data/instruction_tuning`(mounted ssd storage).
+Current directory is `/home/intern2/fm2026/mrfm-intern/code_it_new`, and most of the data are in `/fast_storage/intern/data/instruction_tuning`(mounted ssd storage).
 
 User is `intern2`, and is operating in a remote ssh environment. 
 The ssh machine is a single node with 8 NVIDIA Quadro RTX 8000(46GB VRAM).

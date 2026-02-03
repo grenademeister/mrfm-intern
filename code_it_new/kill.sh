@@ -18,15 +18,13 @@ fi
 
 echo "[INFO] Searching for running tensorboard processes owned by $USER_NAME..."
 
-TB_PIDS=$(ps -u $USER_NAME -f | grep tensorboard | grep -v grep | awk '{print $2}')
+TB_PIDS=$(pgrep -u "$USER_NAME" -f "tensorboard")
 
 if [ -z "$TB_PIDS" ]; then
     echo "[INFO] No tensorboard processes found."
 else
     echo "[INFO] Found the following tensorboard process IDs: $TB_PIDS"
-    for pid in $TB_PIDS; do
-        echo "[INFO] Killing process ID: $pid"
-        kill -9 $pid
-    done
+    echo "[INFO] Killing all tensorboard processes owned by $USER_NAME..."
+    pkill -9 -u "$USER_NAME" -f "tensorboard"
     echo "[INFO] All tensorboard processes owned by $USER_NAME have been terminated."
 fi
