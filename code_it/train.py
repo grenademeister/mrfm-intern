@@ -16,7 +16,8 @@ from common.utils import (
 from common.wrapper import error_wrap
 from core_funcs import NETWORK, OPTIM, ModelType, get_learning_rate, get_optim, save_checkpoint, set_optimizer_lr, test_part, train_epoch
 from datawrapper.datawrapper import LoaderConfig, get_data_wrapper_loader
-from model.listfm_it import load_from_ckpt
+from model.listfm_backbone import LISTFMConfig
+from model.listfm_it import LISTFoundationModelIT, load_from_ckpt
 from model.unet import Unet
 from params import config
 
@@ -31,6 +32,9 @@ class Trainer:
     valid_loader: DataLoader
     optims: list[OPTIM | None]
     tb_writer: SummaryWriter | None
+    resume_ckpt_path: Path | None
+    resume_state: dict | None
+    start_epoch: int
 
     def __init__(
         self,
@@ -42,10 +46,20 @@ class Trainer:
         config.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # dir setting
-        self.run_dir = config.run_dir / f"{call_next_id(config.run_dir):05d}_train"
+        if config.resume and not config.resume_path:
+            raise ValueError("resume is True but resume_path is empty.")
+        self.resume_ckpt_path = None
+        if config.resume:
+            self.resume_ckpt_path = self._resolve_resume_ckpt_path(Path(config.resume_path))
+            self.run_dir = self._resolve_run_dir(self.resume_ckpt_path)
+        else:
+            self.run_dir = config.run_dir / f"{call_next_id(config.run_dir):05d}_train"
+        os.makedirs(self.run_dir, exist_ok=True)
         logger_add_handler(logger, f"{self.run_dir/'log.log'}", config.log_lv)
         logger.info(separator())
         logger.info(f"Run dir: {self.run_dir}")
+        if self.resume_ckpt_path is not None:
+            logger.info(f"Resume checkpoint: {self.resume_ckpt_path}")
         os.makedirs(self.run_dir, exist_ok=True)
         self.tb_writer = None
         if config.tb_enable:
@@ -59,6 +73,59 @@ class Trainer:
         config_dict = asdict(config)
         for k in config_dict:
             logger.info(f"{k}:{config_dict[k]}")
+
+        self.resume_state = None
+        self.start_epoch = 0
+
+    def _resolve_run_dir(
+        self,
+        ckpt_path: Path,
+    ) -> Path:
+        if ckpt_path.parent.name == "checkpoints":
+            return ckpt_path.parent.parent
+        return ckpt_path.parent
+
+    def _resolve_resume_ckpt_path(
+        self,
+        resume_path: Path,
+    ) -> Path:
+        if resume_path.is_file():
+            return resume_path
+        if not resume_path.is_dir():
+            raise FileNotFoundError(f"Resume path {resume_path} does not exist.")
+        ckpt_dir = resume_path / "checkpoints" if (resume_path / "checkpoints").is_dir() else resume_path
+        candidates = list(ckpt_dir.glob("checkpoint_*.ckpt"))
+        if not candidates:
+            raise FileNotFoundError(f"No checkpoints found in {ckpt_dir}")
+
+        def _epoch_from_name(path: Path) -> int | None:
+            stem = path.stem
+            if "_" not in stem:
+                return None
+            suffix = stem.split("_", 1)[1]
+            return int(suffix) if suffix.isdigit() else None
+
+        numeric = [(epoch, path) for path in candidates if (epoch := _epoch_from_name(path)) is not None]
+        if numeric:
+            numeric.sort(key=lambda x: x[0])
+            return numeric[-1][1]
+        best = [path for path in candidates if path.stem.endswith("best")]
+        if best:
+            return best[0]
+        candidates.sort(key=lambda p: p.stat().st_mtime)
+        return candidates[-1]
+
+    def _normalize_state_dict(
+        self,
+        state_dict: dict,
+        is_parallel: bool,
+    ) -> dict:
+        has_module = any(key.startswith("module.") for key in state_dict)
+        if has_module and not is_parallel:
+            return {key[7:]: value for key, value in state_dict.items()}
+        if not has_module and is_parallel:
+            return {f"module.{key}": value for key, value in state_dict.items()}
+        return state_dict
 
     def __call__(
         self,
@@ -76,13 +143,36 @@ class Trainer:
     def _set_data(
         self,
     ) -> None:
-        if ModelType.from_string(config.model_type) == ModelType.LISTFM_IT:
-            self.network = load_from_ckpt(
-                ckpt_path=Path(config.pretrained),
-                from_scratch=config.from_scratch,
-                use_vision_decoder=True,
-                use_vision_decoder_weights=False,
+        if config.resume:
+            if self.resume_ckpt_path is None:
+                raise ValueError("resume is True but resume_ckpt_path is not set.")
+            self.resume_state = torch.load(
+                self.resume_ckpt_path,
+                map_location="cpu",
+                weights_only=False,
             )
+            stored_epoch = self.resume_state.get("epoch")
+            if stored_epoch is not None:
+                self.start_epoch = int(stored_epoch) + 1
+        if ModelType.from_string(config.model_type) == ModelType.LISTFM_IT:
+            if config.resume:
+                if self.resume_state is None or "model_config" not in self.resume_state:
+                    raise KeyError("Resume checkpoint missing model_config.")
+                listfmconfig = LISTFMConfig(**self.resume_state["model_config"])
+                listfmconfig.text_enc_pretrained = None
+                self.network = LISTFoundationModelIT(
+                    listfmconfig,
+                    use_vision_decoder=True,
+                )
+                state_dict = self._normalize_state_dict(self.resume_state["model_state_dict"], is_parallel=False)
+                self.network.load_state_dict(state_dict, strict=True)
+            else:
+                self.network = load_from_ckpt(
+                    ckpt_path=Path(config.pretrained),
+                    from_scratch=config.from_scratch,
+                    use_vision_decoder=True,
+                    use_vision_decoder_weights=False,
+                )
             logger.info(separator())
             logger.info("Model Config")
             config_dict = asdict(self.network.listfmconfig)
@@ -95,6 +185,11 @@ class Trainer:
                 chans=64,
                 num_pool_layers=4,
             )
+            if config.resume:
+                if self.resume_state is None or "model_state_dict" not in self.resume_state:
+                    raise KeyError("Resume checkpoint missing model_state_dict.")
+                state_dict = self._normalize_state_dict(self.resume_state["model_state_dict"], is_parallel=False)
+                self.network.load_state_dict(state_dict, strict=True)
             logger.info(separator())
             logger.info("Model Config")
             config_dict = {
@@ -176,6 +271,10 @@ class Trainer:
     def _set_network(
         self,
     ) -> None:
+        if config.parallel:
+            self.network = torch.nn.DataParallel(self.network).to(config.device)
+        else:
+            self.network = self.network.to(config.device)
 
         self.optims = [
             get_optim(
@@ -183,11 +282,16 @@ class Trainer:
                 optimizer=config.optimizer,
             ),
         ]
-
-        if config.parallel:
-            self.network = torch.nn.DataParallel(self.network).to(config.device)
-        else:
-            self.network = self.network.to(config.device)
+        if config.resume and self.resume_state is not None:
+            optim_state_dicts = self.resume_state.get("optim_state_dicts")
+            if optim_state_dicts is not None:
+                for optim, state in zip(self.optims, optim_state_dicts):
+                    if optim is not None and state is not None:
+                        optim.load_state_dict(state)
+                        for value in optim.state.values():
+                            for key, tensor in value.items():
+                                if torch.is_tensor(tensor):
+                                    value[key] = tensor.to(config.device)
 
     @error_wrap
     def _train(
@@ -198,7 +302,10 @@ class Trainer:
 
         best_metric: float = 0
 
-        for epoch in range(config.train_epoch):
+        start_epoch = self.start_epoch
+        if config.resume and start_epoch > 0:
+            logger.info(f"Resume start epoch: {start_epoch}")
+        for epoch in range(start_epoch, config.train_epoch):
             logger.info(f"Epoch: {epoch}")
             lr_epoch = get_learning_rate(
                 epoch=epoch,
@@ -226,6 +333,8 @@ class Trainer:
                 network=self.network,
                 run_dir=self.run_dir,
                 epoch=epoch,
+                optims=optims,
+                epoch_idx=epoch,
             )
 
             if epoch < config.valid_tol:
@@ -242,6 +351,8 @@ class Trainer:
                 save_checkpoint(
                     network=self.network,
                     run_dir=self.run_dir,
+                    optims=optims,
+                    epoch_idx=epoch,
                 )
 
     @error_wrap

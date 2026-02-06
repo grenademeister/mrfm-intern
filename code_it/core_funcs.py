@@ -230,15 +230,25 @@ def save_checkpoint(
     network: NETWORK,
     run_dir: Path,
     epoch: str | int | None = None,
+    optims: list[OPTIM | None] | None = None,
+    epoch_idx: int | None = None,
 ) -> None:
     if epoch is None:
         epoch = "best"
     os.makedirs(run_dir / "checkpoints", exist_ok=True)
+    optim_state_dicts = None
+    if optims is not None:
+        optim_state_dicts = [optim.state_dict() if optim is not None else None for optim in optims]
+    stored_epoch = epoch_idx
+    if stored_epoch is None and isinstance(epoch, int):
+        stored_epoch = epoch
     if ModelType.from_string(config.model_type) == ModelType.LISTFM_IT:
         torch.save(
             {
                 "model_state_dict": network.state_dict(),
                 "model_config": asdict(network.module.listfmconfig if isinstance(network, torch.nn.DataParallel) else network.listfmconfig),
+                "epoch": stored_epoch,
+                "optim_state_dicts": optim_state_dicts,
             },
             run_dir / f"checkpoints/checkpoint_{epoch}.ckpt",
         )
@@ -246,6 +256,8 @@ def save_checkpoint(
         torch.save(
             {
                 "model_state_dict": network.state_dict(),
+                "epoch": stored_epoch,
+                "optim_state_dicts": optim_state_dicts,
             },
             run_dir / f"checkpoints/checkpoint_{epoch}.ckpt",
         )

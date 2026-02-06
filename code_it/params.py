@@ -79,6 +79,10 @@ class GeneralConfig:
 
     tag: str = ""
 
+    # Resume
+    resume: bool = False
+    resume_path: str = ""
+
 
 @dataclass
 class TestConfig:
