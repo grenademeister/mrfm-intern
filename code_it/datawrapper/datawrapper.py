@@ -51,7 +51,8 @@ class DataKey(IntEnum):
     Instruction = 3
     InstructionLLMIds = 4
     InstructionLLMAttention = 5
-    TaskName = 6
+    InstructionRaw = 6
+    TaskName = 7
 
 
 @dataclass
@@ -183,11 +184,12 @@ class DataWrapper(Dataset):
         # use existing text encoder for now
         instruction = loadmat(self.file_list[idx])["instruction"][0][0]
         instruction = _coerce_matlab_text(instruction)
+        instruction_raw = instruction
         instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
 
         if self.qwen_tokenizer is None:
             instruction_llm_ids = torch.zeros(1, dtype=torch.long)
-            instruction_llm_mask = torch.zeros(1, dtype=torch.long)
+            instruction_llm_mask = (instruction_token != 0).to(torch.long)
         else:
             llm_inputs = self.qwen_tokenizer(
                 instruction,
@@ -214,6 +216,7 @@ class DataWrapper(Dataset):
             instruction_token,
             instruction_llm_ids,
             instruction_llm_mask,
+            instruction_raw,
             task_name,
         )
 

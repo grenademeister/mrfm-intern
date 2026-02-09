@@ -305,7 +305,7 @@ def step_optimizers(
 def save_result_to_mat(
     test_dir: Path,
     batch_cnt: int,
-    tesner_dict: dict[str, Tensor | None],
+    tesner_dict: dict[str, Tensor | str | tuple[str, ...] | list[str] | None],
     img_cnt: int,
     rank: int = 0,
     world_size: int = 1,
@@ -319,8 +319,14 @@ def save_result_to_mat(
 
     for i in range(batch_cnt):
         for key, value in tesner_dict.items():
-            if value is not None:
+            if value is None:
+                continue
+            if torch.is_tensor(value):
                 save_dict[key] = value.cpu().detach().numpy()[i, ...]
+            elif isinstance(value, (list, tuple)):
+                save_dict[key] = value[i]
+            else:
+                save_dict[key] = value
 
         # Global unique index across ranks: interleave by rank
         idx = (img_cnt + i) * world_size + rank + 1
@@ -339,9 +345,10 @@ def train_epoch_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    instruction_raw: tuple[str, ...] = _data[DataKey.InstructionRaw]
     if config.text_encoding == "clip":
         instruction_llm_ids = None
-        instruction_llm_mask = None
+        instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
     else:
         instruction_llm_ids = _data[DataKey.InstructionLLMIds].to(config.device)
         instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
@@ -441,7 +448,7 @@ def test_part_listfm_vision_pretraining(
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
     if config.text_encoding == "clip":
         instruction_llm_ids = None
-        instruction_llm_mask = None
+        instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
     else:
         instruction_llm_ids = _data[DataKey.InstructionLLMIds].to(config.device)
         instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
@@ -490,6 +497,7 @@ def test_part_listfm_vision_pretraining(
                 "label": label,
                 "text": text,
                 "instruction": instruction,
+                "instruction_raw": instruction_raw,
             },
             img_cnt=img_cnt,
             rank=rank,

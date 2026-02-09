@@ -150,55 +150,6 @@ class InstructionCrossAttention(nn.Module):
         attn_out = attn_out.transpose(1, 2).reshape(b, -1, h, w)
         return x + self.out_proj(attn_out)
 
-# class InstructionCrossAttention(nn.Module):
-    # def __init__(
-    #     self,
-    #     chans: int,
-    #     instruction_dim: int,
-    #     attn_ratio: float = 0.25,
-    #     min_attn_dim: int = 32,
-    #     num_heads: int = 4,
-    # ) -> None:
-    #     super().__init__()
-    #     attn_dim = max(min_attn_dim, int(chans * attn_ratio))
-    #     if attn_dim % num_heads != 0:
-    #         attn_dim = ((attn_dim + num_heads - 1) // num_heads) * num_heads
-    #     self.q_proj = nn.Conv2d(chans, attn_dim, kernel_size=1, padding=0)
-    #     self.k_proj = nn.Linear(instruction_dim, attn_dim, bias=False)
-    #     self.v_proj = nn.Linear(instruction_dim, attn_dim, bias=False)
-    #     self.attn = nn.MultiheadAttention(attn_dim, num_heads, batch_first=True)
-    #     self.q_norm = nn.LayerNorm(attn_dim)
-    #     self.k_norm = nn.LayerNorm(attn_dim)
-    #     self.v_norm = nn.LayerNorm(attn_dim)
-    #     self.out_proj = nn.Conv2d(attn_dim, chans, kernel_size=1, padding=0)
-
-    # def forward(
-    #     self,
-    #     x: torch.Tensor,
-    #     instruction: torch.Tensor,
-    #     instruction_mask: torch.Tensor | None = None,
-    # ) -> torch.Tensor:
-    #     if instruction is None:
-    #         return x
-    #     q = self.q_proj(x)
-    #     b, c, h, w = q.shape
-    #     q = q.flatten(2).transpose(1, 2)
-    #     k = self.k_proj(instruction)
-    #     v = self.v_proj(instruction)
-    #     q = self.q_norm(q)
-    #     k = self.k_norm(k)
-    #     v = self.v_norm(v)
-    #     key_padding_mask = None
-    #     if instruction_mask is not None:
-    #         if instruction_mask.dim() == 1:
-    #             instruction_mask = instruction_mask.unsqueeze(0)
-    #         if instruction_mask.shape[:2] != k.shape[:2]:
-    #             raise ValueError("instruction_mask must be shaped (B, N) to match instruction.")
-    #         key_padding_mask = ~instruction_mask.to(torch.bool)
-    #     attn_out, _ = self.attn(q, k, v, need_weights=False, key_padding_mask=key_padding_mask)
-    #     attn_out = attn_out.transpose(1, 2).reshape(b, c, h, w)
-    #     return x + self.out_proj(attn_out)
-
 
 class VisionTextDecoder(nn.Module):
     out_chans: int
