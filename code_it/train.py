@@ -1,10 +1,23 @@
 import os
+import sys
+
+# [중요] LOCAL_RANK를 확인하여 import torch 전에 GPU를 물리적으로 격리합니다.
+# 이렇게 하면 각 프로세스는 자기에게 할당된 GPU 1개만 '0번'으로 인식하게 됩니다.
+if "LOCAL_RANK" in os.environ and "CUDA_VISIBLE_DEVICES" in os.environ:
+    local_rank = int(os.environ["LOCAL_RANK"])
+    visible_devices = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
+    if len(visible_devices) > local_rank:
+        # 현재 프로세스가 사용할 물리적 GPU 번호 하나만 남깁니다.
+        os.environ["CUDA_VISIBLE_DEVICES"] = visible_devices[local_rank]
+
 import time
+
 import warnings
 from dataclasses import asdict
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -40,10 +53,31 @@ class Trainer:
         self,
     ) -> None:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu
+        if "CUDA_VISIBLE_DEVICES" not in os.environ:
+            os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu
 
         config.init_time = time.time()
-        config.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.is_distributed = False
+        self.local_rank = 0
+        self.global_rank = 0
+        self.world_size = 1
+        if dist.is_available():
+            world_size_env = int(os.environ.get("WORLD_SIZE", "1"))
+            if world_size_env > 1:
+                self.is_distributed = True
+                # 이미 격리되었으므로 여기서 local_rank는 항상 0이 됩니다.
+                self.local_rank = 0
+                self.global_rank = int(os.environ.get("RANK", "0"))
+                self.world_size = world_size_env
+                torch.cuda.set_device(0)
+                dist.init_process_group(backend="nccl", init_method="env://")
+
+        self.is_main_process = self.global_rank == 0
+        if self.is_distributed:
+            config.device = torch.device("cuda", 0)
+        else:
+            config.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # dir setting
         if config.resume and not config.resume_path:
@@ -53,26 +87,38 @@ class Trainer:
             self.resume_ckpt_path = self._resolve_resume_ckpt_path(Path(config.resume_path))
             self.run_dir = self._resolve_run_dir(self.resume_ckpt_path)
         else:
-            self.run_dir = config.run_dir / f"{call_next_id(config.run_dir):05d}_train"
+            if self.is_distributed:
+                if self.is_main_process:
+                    run_dir = config.run_dir / f"{call_next_id(config.run_dir):05d}_train"
+                    obj_list = [str(run_dir)]
+                else:
+                    obj_list = [""]
+                if dist.is_available() and dist.is_initialized():
+                    dist.broadcast_object_list(obj_list, src=0)
+                self.run_dir = Path(obj_list[0])
+            else:
+                self.run_dir = config.run_dir / f"{call_next_id(config.run_dir):05d}_train"
         os.makedirs(self.run_dir, exist_ok=True)
-        logger_add_handler(logger, f"{self.run_dir/'log.log'}", config.log_lv)
-        logger.info(separator())
-        logger.info(f"Run dir: {self.run_dir}")
-        if self.resume_ckpt_path is not None:
-            logger.info(f"Resume checkpoint: {self.resume_ckpt_path}")
+        if self.is_main_process:
+            logger_add_handler(logger, f"{self.run_dir/'log.log'}", config.log_lv)
+            logger.info(separator())
+            logger.info(f"Run dir: {self.run_dir}")
+            if self.resume_ckpt_path is not None:
+                logger.info(f"Resume checkpoint: {self.resume_ckpt_path}")
         os.makedirs(self.run_dir, exist_ok=True)
         self.tb_writer = None
-        if config.tb_enable:
+        if config.tb_enable and self.is_main_process:
             tb_dir = self.run_dir / config.tb_log_dir
             os.makedirs(tb_dir, exist_ok=True)
             self.tb_writer = SummaryWriter(log_dir=str(tb_dir))
 
         # log config
-        logger.info(separator())
-        logger.info("General Config")
-        config_dict = asdict(config)
-        for k in config_dict:
-            logger.info(f"{k}:{config_dict[k]}")
+        if self.is_main_process:
+            logger.info(separator())
+            logger.info("General Config")
+            config_dict = asdict(config)
+            for k in config_dict:
+                logger.info(f"{k}:{config_dict[k]}")
 
         self.resume_state = None
         self.start_epoch = 0
@@ -138,6 +184,8 @@ class Trainer:
             if self.tb_writer is not None:
                 self.tb_writer.flush()
                 self.tb_writer.close()
+            if self.is_distributed and dist.is_available() and dist.is_initialized():
+                dist.destroy_process_group()
 
     @error_wrap
     def _set_data(
@@ -163,6 +211,9 @@ class Trainer:
                 self.network = LISTFoundationModelIT(
                     listfmconfig,
                     use_vision_decoder=True,
+                    qwen_model_path=config.qwen_model_path,
+                    qwen_lora_path=config.qwen_lora_path,
+                    qwen_trainable=config.qwen_trainable,
                 )
                 state_dict = self._normalize_state_dict(self.resume_state["model_state_dict"], is_parallel=False)
                 self.network.load_state_dict(state_dict, strict=True)
@@ -172,6 +223,9 @@ class Trainer:
                     from_scratch=config.from_scratch,
                     use_vision_decoder=True,
                     use_vision_decoder_weights=False,
+                    qwen_model_path=config.qwen_model_path,
+                    qwen_lora_path=config.qwen_lora_path,
+                    qwen_trainable=config.qwen_trainable,
                 )
             logger.info(separator())
             logger.info("Model Config")
@@ -215,6 +269,9 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            qwen_model_path=config.qwen_model_path,
+            qwen_max_length=config.qwen_max_length,
+            qwen_use_fast=config.qwen_use_fast,
         )
 
         valid_loader_cfg = LoaderConfig(
@@ -228,6 +285,9 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            qwen_model_path=config.qwen_model_path,
+            qwen_max_length=config.qwen_max_length,
+            qwen_use_fast=config.qwen_use_fast,
         )
 
         test_loader_cfg = LoaderConfig(
@@ -241,6 +301,9 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            qwen_model_path=config.qwen_model_path,
+            qwen_max_length=config.qwen_max_length,
+            qwen_use_fast=config.qwen_use_fast,
         )
 
         self.train_loader, _, self.train_len = get_data_wrapper_loader(
@@ -248,6 +311,9 @@ class Trainer:
             training_mode=True,
             loader_cfg=train_loader_cfg,
             split="train",
+            distributed=self.is_distributed,
+            rank=self.global_rank,
+            world_size=self.world_size,
         )
         logger.info(f"Train dataset length : {self.train_len}")
 
@@ -256,6 +322,9 @@ class Trainer:
             training_mode=False,
             loader_cfg=valid_loader_cfg,
             split="valid",
+            distributed=False,
+            rank=0,
+            world_size=1,
         )
         logger.info(f"Valid dataset length : {valid_len}")
 
@@ -264,6 +333,9 @@ class Trainer:
             training_mode=False,
             loader_cfg=test_loader_cfg,
             split="test",
+            distributed=False,
+            rank=0,
+            world_size=1,
         )
         logger.info(f"Test dataset length : {test_len}")
 
@@ -271,8 +343,13 @@ class Trainer:
     def _set_network(
         self,
     ) -> None:
-        if config.parallel:
-            self.network = torch.nn.DataParallel(self.network).to(config.device)
+        if self.is_distributed:
+            self.network = torch.nn.parallel.DistributedDataParallel(
+                self.network.to(config.device),
+                device_ids=[0],
+                output_device=0,
+                find_unused_parameters=True,
+            )
         else:
             self.network = self.network.to(config.device)
 
@@ -297,8 +374,9 @@ class Trainer:
     def _train(
         self,
     ) -> None:
-        logger.info(separator())
-        logger.info("Train start")
+        if self.is_main_process:
+            logger.info(separator())
+            logger.info("Train start")
 
         best_metric: float = 0
 
@@ -306,7 +384,8 @@ class Trainer:
         if config.resume and start_epoch > 0:
             logger.info(f"Resume start epoch: {start_epoch}")
         for epoch in range(start_epoch, config.train_epoch):
-            logger.info(f"Epoch: {epoch}")
+            if self.is_main_process:
+                logger.info(f"Epoch: {epoch}")
             lr_epoch = get_learning_rate(
                 epoch=epoch,
                 lr=config.lr,
@@ -315,9 +394,15 @@ class Trainer:
             )
 
             optims = [set_optimizer_lr(optimizer=optim, learning_rate=lr_epoch) for optim in self.optims]
-            logger.info(f"Learning rate: {lr_epoch:0.3e}")
-            if self.tb_writer is not None:
+            if self.is_main_process:
+                logger.info(f"Learning rate: {lr_epoch:0.3e}")
+            if self.tb_writer is not None and self.is_main_process:
                 self.tb_writer.add_scalar("train/lr", lr_epoch, epoch)
+
+            if self.is_distributed and hasattr(self.train_loader, "sampler"):
+                sampler = self.train_loader.sampler
+                if hasattr(sampler, "set_epoch"):
+                    sampler.set_epoch(epoch)
 
             train_epoch(
                 train_loader=self.train_loader,
@@ -327,15 +412,17 @@ class Trainer:
                 epoch=epoch,
                 tb_writer=self.tb_writer,
                 tb_log_batch=config.tb_log_batch,
+                log_enabled=self.is_main_process,
             )
 
-            save_checkpoint(
-                network=self.network,
-                run_dir=self.run_dir,
-                epoch=epoch,
-                optims=optims,
-                epoch_idx=epoch,
-            )
+            if self.is_main_process:
+                save_checkpoint(
+                    network=self.network,
+                    run_dir=self.run_dir,
+                    epoch=epoch,
+                    optims=optims,
+                    epoch_idx=epoch,
+                )
 
             if epoch < config.valid_tol:
                 continue
@@ -345,7 +432,7 @@ class Trainer:
                 primary_metric = self._valid(epoch)
                 self._test(epoch)
 
-            if primary_metric is not None and primary_metric > best_metric:
+            if self.is_main_process and primary_metric is not None and primary_metric > best_metric:
                 best_metric = primary_metric
                 logger.success("Best model renew")
                 save_checkpoint(
@@ -360,7 +447,8 @@ class Trainer:
         self,
         epoch: int,
     ) -> float:
-        logger.info("Valid")
+        if self.is_main_process:
+            logger.info("Valid")
         with torch.no_grad():
             primary_metric = test_part(
                 epoch=epoch,
@@ -368,7 +456,11 @@ class Trainer:
                 network=self.network,
                 run_dir=self.run_dir,
                 save_val=False,
-                tb_writer=self.tb_writer,
+                distributed=self.is_distributed,
+                rank=self.global_rank,
+                world_size=self.world_size,
+                log_enabled=self.is_main_process,
+                tb_writer=self.tb_writer if self.is_main_process else None,
                 tb_prefix="valid",
             )
         return primary_metric
@@ -378,7 +470,8 @@ class Trainer:
         self,
         epoch: int,
     ) -> None:
-        logger.info("Test")
+        if self.is_main_process:
+            logger.info("Test")
         with torch.no_grad():
             test_part(
                 epoch=epoch,
@@ -386,7 +479,11 @@ class Trainer:
                 network=self.network,
                 run_dir=self.run_dir,
                 save_val=config.save_val,
-                tb_writer=self.tb_writer,
+                distributed=self.is_distributed,
+                rank=self.global_rank,
+                world_size=self.world_size,
+                log_enabled=self.is_main_process,
+                tb_writer=self.tb_writer if self.is_main_process else None,
                 tb_prefix="test",
             )
 

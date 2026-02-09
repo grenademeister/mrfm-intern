@@ -8,6 +8,7 @@ from enum import Enum
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 from scipy.io import savemat
 from torch import Tensor
 from torch.optim import Adam, AdamW
@@ -24,7 +25,7 @@ from params import config
 if TYPE_CHECKING:
     from torch.utils.tensorboard import SummaryWriter
 
-NETWORK = LISTFoundationModelIT | torch.nn.DataParallel[LISTFoundationModelIT]
+NETWORK = LISTFoundationModelIT | torch.nn.DataParallel[LISTFoundationModelIT] | torch.nn.parallel.DistributedDataParallel
 OPTIM = Adam | AdamW
 
 
@@ -90,6 +91,8 @@ def _rectified_flow_sample_dep(
     img: Tensor,
     text: Tensor,
     instruction: Tensor,
+    instruction_llm_ids: Tensor | None = None,
+    instruction_llm_mask: Tensor | None = None,
 ) -> Tensor:
     """Deprecated rectified flow sampling function."""
     steps = max(1, int(config.flow_eval_steps))
@@ -104,6 +107,8 @@ def _rectified_flow_sample_dep(
             use_bottleneck=config.use_bottleneck,
             grad_encoder=config.grad_encoder,
             instruction=instruction,
+            instruction_llm_ids=instruction_llm_ids,
+            instruction_llm_mask=instruction_llm_mask,
             flow_xt=x,
             flow_t=t.view(img.shape[0], 1),
         )
@@ -119,6 +124,8 @@ def _rectified_flow_sample_dep(
         use_bottleneck=config.use_bottleneck,
         grad_encoder=config.grad_encoder,
         instruction=instruction,
+        instruction_llm_ids=instruction_llm_ids,
+        instruction_llm_mask=instruction_llm_mask,
         flow_xt=x,
         flow_t=t_last.view(img.shape[0], 1),
     )
@@ -133,6 +140,8 @@ def rectified_flow_sample(
     img: Tensor,
     text: Tensor,
     instruction: Tensor,
+    instruction_llm_ids: Tensor | None = None,
+    instruction_llm_mask: Tensor | None = None,
     steps: int | None = None,
     t_eps: float | None = None,
 ) -> Tensor:
@@ -151,6 +160,8 @@ def rectified_flow_sample(
             use_bottleneck=config.use_bottleneck,
             grad_encoder=config.grad_encoder,
             instruction=instruction,
+            instruction_llm_ids=instruction_llm_ids,
+            instruction_llm_mask=instruction_llm_mask,
             flow_xt=z,
             flow_t=t.view(img.shape[0], 1),
         )
@@ -246,7 +257,17 @@ def save_checkpoint(
         torch.save(
             {
                 "model_state_dict": network.state_dict(),
-                "model_config": asdict(network.module.listfmconfig if isinstance(network, torch.nn.DataParallel) else network.listfmconfig),
+                "model_config": asdict(
+                    network.module.listfmconfig
+                    if isinstance(
+                        network,
+                        (
+                            torch.nn.DataParallel,
+                            torch.nn.parallel.DistributedDataParallel,
+                        ),
+                    )
+                    else network.listfmconfig
+                ),
                 "epoch": stored_epoch,
                 "optim_state_dicts": optim_state_dicts,
             },
@@ -286,6 +307,8 @@ def save_result_to_mat(
     batch_cnt: int,
     tesner_dict: dict[str, Tensor | None],
     img_cnt: int,
+    rank: int = 0,
+    world_size: int = 1,
 ) -> None:
     os.makedirs(test_dir, exist_ok=True)
     save_dict = {}
@@ -299,7 +322,8 @@ def save_result_to_mat(
             if value is not None:
                 save_dict[key] = value.cpu().detach().numpy()[i, ...]
 
-        idx = img_cnt + i + 1
+        # Global unique index across ranks: interleave by rank
+        idx = (img_cnt + i) * world_size + rank + 1
         savemat(f"{test_dir}/{idx}_res.mat", save_dict)
 
 
@@ -315,6 +339,8 @@ def train_epoch_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    instruction_llm_ids: Tensor = _data[DataKey.InstructionLLMIds].to(config.device)
+    instruction_llm_mask: Tensor = _data[DataKey.InstructionLLMAttention].to(config.device)
     img_cnt_minibatch = input.shape[0]
 
     flow_t = sample_flow_t(batch=img_cnt_minibatch, device=config.device)
@@ -324,6 +350,8 @@ def train_epoch_listfm_vision_pretraining(
         img=input,
         text=text,
         instruction=instruction,
+        instruction_llm_ids=instruction_llm_ids,
+        instruction_llm_mask=instruction_llm_mask,
         use_bottleneck=config.use_bottleneck,
         grad_encoder=config.grad_encoder,
         flow_xt=flow_xt,
@@ -347,6 +375,7 @@ def train_epoch(
     epoch: int,
     tb_writer: "SummaryWriter | None" = None,
     tb_log_batch: bool = False,
+    log_enabled: bool = True,
 ) -> None:
     train_state = MetricController()
     train_state.reset()
@@ -365,11 +394,11 @@ def train_epoch(
         )
 
         step_optimizers(optim_list=optim_list)
-        if tb_writer is not None and tb_log_batch:
+        if tb_writer is not None and tb_log_batch and log_enabled:
             step = epoch * total_batches + batch_idx
             tb_writer.add_scalar("train/loss_batch", loss_mean, step)
         img_cnt += img_cnt_minibatch
-        if img_cnt > (train_len / config.logging_density * logging_cnt):
+        if log_enabled and img_cnt > (train_len / config.logging_density * logging_cnt):
             log_summary(
                 init_time=config.init_time,
                 state=train_state,
@@ -379,13 +408,14 @@ def train_epoch(
             )
             logging_cnt += 1
 
-    log_summary(
-        init_time=config.init_time,
-        state=train_state,
-        tb_writer=tb_writer,
-        tb_prefix="train",
-        step=epoch,
-    )
+    if log_enabled:
+        log_summary(
+            init_time=config.init_time,
+            state=train_state,
+            tb_writer=tb_writer,
+            tb_prefix="train",
+            step=epoch,
+        )
 
 
 def test_part_listfm_vision_pretraining(
@@ -395,6 +425,8 @@ def test_part_listfm_vision_pretraining(
     save_val: bool,
     test_state: MetricController,
     img_cnt: int,
+    rank: int = 0,
+    world_size: int = 1,
     task_states: dict[str, MetricController] | None = None,
 ) -> float:
     loss_func = get_loss_func(config.loss_model)
@@ -403,6 +435,8 @@ def test_part_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    instruction_llm_ids: Tensor = _data[DataKey.InstructionLLMIds].to(config.device)
+    instruction_llm_mask: Tensor = _data[DataKey.InstructionLLMAttention].to(config.device)
     task_names: tuple[str, ...] = _data[DataKey.TaskName]
 
     batch_cnt = input.shape[0]
@@ -412,6 +446,8 @@ def test_part_listfm_vision_pretraining(
             img=input,
             text=text,
             instruction=instruction,
+            instruction_llm_ids=instruction_llm_ids,
+            instruction_llm_mask=instruction_llm_mask,
         )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
@@ -448,6 +484,8 @@ def test_part_listfm_vision_pretraining(
                 "instruction": instruction,
             },
             img_cnt=img_cnt,
+            rank=rank,
+            world_size=world_size,
         )
 
     return batch_cnt
@@ -459,6 +497,10 @@ def test_part(
     network: NETWORK,
     run_dir: Path,
     save_val: bool,
+    distributed: bool = False,
+    rank: int = 0,
+    world_size: int = 1,
+    log_enabled: bool = True,
     tb_writer: "SummaryWriter | None" = None,
     tb_prefix: str = "valid",
 ) -> float:
@@ -470,45 +512,128 @@ def test_part(
 
     img_cnt: int = 0
     for _data in data_loader:
+        global_img_cnt = img_cnt * world_size + rank
         batch_cnt = test_part_listfm_vision_pretraining(
             _data=_data,
             test_dir=run_dir / f"test/ep_{epoch}",
             model=model,
-            save_val=save_val and img_cnt <= config.save_max_idx,
+            save_val=save_val and global_img_cnt <= config.save_max_idx,
             test_state=test_state,
             img_cnt=img_cnt,
+            rank=rank,
+            world_size=world_size,
             task_states=task_states,
         )
 
         img_cnt += batch_cnt
 
-    # Log overall metrics
-    logger.info("=" * 80)
-    logger.info("Overall Metrics:")
-    log_summary(
-        init_time=config.init_time,
-        state=test_state,
-        log_std=True,
-        tb_writer=tb_writer,
-        tb_prefix=tb_prefix,
-        step=epoch,
-    )
+    if distributed and dist.is_available() and dist.is_initialized():
+        global_stats: dict[str, tuple[float, float]] = {}
+        for key, values in test_state.state_dict.items():
+            if not values:
+                continue
+            local_sum = float(sum(values))
+            local_sumsq = float(sum(v * v for v in values))
+            local_count = float(len(values))
+            stats = torch.tensor([local_sum, local_sumsq, local_count], device=config.device)
+            dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+            total_sum, total_sumsq, total_count = stats.tolist()
+            if total_count <= 0:
+                mean = 0.0
+                std = 0.0
+            else:
+                mean = total_sum / total_count
+                if total_count > 1:
+                    var = (total_sumsq - (total_sum * total_sum) / total_count) / (total_count - 1)
+                    std = math.sqrt(max(var, 0.0))
+                else:
+                    std = 0.0
+            global_stats[key] = (mean, std)
 
-    # Log task-specific metrics
-    if task_states:
+        # Task-specific metrics (gathered across ranks)
+        merged_task_names: list[str] = []
+        if task_states:
+            local_task_names = sorted(task_states.keys())
+            all_task_names: list[list[str]] = [None] * world_size
+            dist.all_gather_object(all_task_names, local_task_names)
+            merged_task_names = sorted({name for sub in all_task_names for name in sub})
+
+        task_global_stats: dict[tuple[str, str], tuple[float, float]] = {}
+        for task_name in merged_task_names:
+            for key in ("loss", "psnr", "ssim"):
+                values = task_states.get(task_name, MetricController()).state_dict.get(key, [])
+                local_sum = float(sum(values)) if values else 0.0
+                local_sumsq = float(sum(v * v for v in values)) if values else 0.0
+                local_count = float(len(values)) if values else 0.0
+                stats = torch.tensor([local_sum, local_sumsq, local_count], device=config.device)
+                dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+                total_sum, total_sumsq, total_count = stats.tolist()
+                if total_count <= 0:
+                    mean = 0.0
+                    std = 0.0
+                else:
+                    mean = total_sum / total_count
+                    if total_count > 1:
+                        var = (total_sumsq - (total_sum * total_sum) / total_count) / (total_count - 1)
+                        std = math.sqrt(max(var, 0.0))
+                    else:
+                        std = 0.0
+                task_global_stats[(task_name, key)] = (mean, std)
+
+        if log_enabled:
+            logger.info("=" * 80)
+            logger.info("Overall Metrics:")
+            spend_time = seconds_to_dhms(time.time() - config.init_time)
+            for key, (mean, std) in global_stats.items():
+                logger.info(f"{spend_time} | {key}: {mean:0.3e} + {std:0.3e}")
+                if tb_writer is not None and tb_prefix is not None and epoch is not None:
+                    tb_writer.add_scalar(f"{tb_prefix}/{key}", mean, epoch)
+                    tb_writer.add_scalar(f"{tb_prefix}/{key}_std", std, epoch)
+            logger.info("=" * 80)
+
+            if merged_task_names:
+                logger.info("Task-specific Metrics:")
+                for task_name in merged_task_names:
+                    logger.info(f"--- {task_name} ---")
+                    for key in ("loss", "psnr", "ssim"):
+                        mean, std = task_global_stats[(task_name, key)]
+                        logger.info(f"{spend_time} | {key}: {mean:0.3e} + {std:0.3e}")
+                        if tb_writer is not None and tb_prefix is not None and epoch is not None:
+                            tb_writer.add_scalar(f"{tb_prefix}/{task_name}/{key}", mean, epoch)
+                            tb_writer.add_scalar(f"{tb_prefix}/{task_name}/{key}_std", std, epoch)
+                logger.info("=" * 80)
+
+        primary_metric = global_stats.get("psnr", (0.0, 0.0))[0]
+        return float(primary_metric)
+
+    # Non-distributed logging
+    if log_enabled:
         logger.info("=" * 80)
-        logger.info("Task-specific Metrics:")
-        for task_name in sorted(task_states.keys()):
-            logger.info(f"--- {task_name} ---")
-            log_summary(
-                init_time=config.init_time,
-                state=task_states[task_name],
-                log_std=True,
-                tb_writer=tb_writer,
-                tb_prefix=f"{tb_prefix}/{task_name}",
-                step=epoch,
-            )
-        logger.info("=" * 80)
+        logger.info("Overall Metrics:")
+        log_summary(
+            init_time=config.init_time,
+            state=test_state,
+            log_std=True,
+            tb_writer=tb_writer,
+            tb_prefix=tb_prefix,
+            step=epoch,
+        )
+
+        # Log task-specific metrics
+        if task_states:
+            logger.info("=" * 80)
+            logger.info("Task-specific Metrics:")
+            for task_name in sorted(task_states.keys()):
+                logger.info(f"--- {task_name} ---")
+                log_summary(
+                    init_time=config.init_time,
+                    state=task_states[task_name],
+                    log_std=True,
+                    tb_writer=tb_writer,
+                    tb_prefix=f"{tb_prefix}/{task_name}",
+                    step=epoch,
+                )
+            logger.info("=" * 80)
 
     primary_metric = test_state.mean("psnr")
     return primary_metric

@@ -8,6 +8,7 @@ from torch import Tensor
 from model.listfm_backbone import LISTFMConfig, LISTFoundationModelBackbone
 from model.listfm_backbone.module import (
     Bottleneck,
+    QwenInstructionEncoder,
     SimpleTokenizer,
     TextEncoder,
     VisionTextDecoder,
@@ -29,11 +30,16 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
     bottleneck: Bottleneck  # predefined
     vision_decoder: VisionTextDecoder
     instruction_encoder: TextEncoder
+    qwen_instruction_encoder: QwenInstructionEncoder | None
 
     def __init__(
         self,
         listfmconfig: LISTFMConfig,
         use_vision_decoder: bool,
+        qwen_model_path: str | None = None,
+        qwen_lora_path: str | None = None,
+        qwen_trainable: bool = False,
+        qwen_dtype: str = "bf16",
     ) -> None:
         super().__init__(
             listfmconfig=listfmconfig,
@@ -59,6 +65,20 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 transformer_layers=listfmconfig.text_enc_tf_head,
                 pretrained_model_weights=listfmconfig.text_enc_pretrained,
             )
+        self.qwen_instruction_encoder = None
+        if qwen_model_path:
+            qwen_dtype_map = {
+                "bf16": torch.bfloat16,
+                "fp16": torch.float16,
+                "fp32": torch.float32,
+            }
+            self.qwen_instruction_encoder = QwenInstructionEncoder(
+                model_path=qwen_model_path,
+                lora_path=qwen_lora_path,
+                embed_dim=listfmconfig.clip_emb_dim,
+                trainable=qwen_trainable,
+                dtype=qwen_dtype_map.get(qwen_dtype, torch.bfloat16),
+            )
 
     def forward(
         self,
@@ -67,6 +87,8 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
         grad_encoder: bool = True,
         use_bottleneck: bool = True,
         instruction: Tensor = None,
+        instruction_llm_ids: Tensor | None = None,
+        instruction_llm_mask: Tensor | None = None,
         flow_xt: Tensor | None = None,
         flow_t: Tensor | None = None,
     ) -> Tensor:
@@ -83,28 +105,42 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
 
         text_ctx = torch.no_grad() if not grad_encoder else nullcontext()
         text_full_feature = None
-        if instruction is None:
-            with text_ctx:
+        if self.qwen_instruction_encoder is None:
+            if instruction is None:
+                with text_ctx:
+                    (
+                        _text_features,
+                        text_full_feature,
+                    ) = self.instruction_encoder(
+                        text=text,
+                    )
+                instruction = text_full_feature
+            elif instruction.dtype in {
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+            }:
+                with text_ctx:
+                    (
+                        _instruction_features,
+                        instruction_full_feature,
+                    ) = self.instruction_encoder(
+                        text=instruction,
+                    )
+                instruction = instruction_full_feature
+        else:
+            if instruction_llm_ids is None:
+                raise ValueError("instruction_llm_ids must be provided when Qwen instruction encoder is enabled.")
+            llm_ctx = nullcontext() if self.qwen_instruction_encoder.trainable else torch.no_grad()
+            with llm_ctx:
                 (
-                    _text_features,
-                    text_full_feature,
-                ) = self.instruction_encoder(
-                    text=text,
-                )
-            instruction = text_full_feature
-        elif instruction.dtype in {
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint8,
-        }:
-            with text_ctx:
-                (
-                    _instruction_features,
+                    _llm_pooled,
                     instruction_full_feature,
-                ) = self.instruction_encoder(
-                    text=instruction,
+                ) = self.qwen_instruction_encoder(
+                    input_ids=instruction_llm_ids,
+                    attention_mask=instruction_llm_mask,
                 )
             instruction = instruction_full_feature
 
@@ -148,6 +184,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             x=img_full_feature,
             stack_feat=stack_feature,
             instruction=instruction,
+            instruction_mask=instruction_llm_mask,
             flow_xt=flow_xt,
             flow_t=flow_t,
         )
@@ -160,6 +197,10 @@ def load_from_ckpt(
     from_scratch: bool = False,
     use_vision_decoder: bool = True,
     use_vision_decoder_weights: bool = True,
+    qwen_model_path: str | None = None,
+    qwen_lora_path: str | None = None,
+    qwen_trainable: bool = False,
+    qwen_dtype: str = "bf16",
 ) -> LISTFoundationModelIT:
     # Validation
     if use_vision_decoder and not use_vision_decoder_weights:
@@ -210,6 +251,10 @@ def load_from_ckpt(
     model = LISTFoundationModelIT(
         listfmconfig,
         use_vision_decoder=use_vision_decoder,
+        qwen_model_path=qwen_model_path,
+        qwen_lora_path=qwen_lora_path,
+        qwen_trainable=qwen_trainable,
+        qwen_dtype=qwen_dtype,
     )
 
     # Load state dict
