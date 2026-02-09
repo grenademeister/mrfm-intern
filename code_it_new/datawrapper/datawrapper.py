@@ -7,12 +7,16 @@ import numpy as np
 import torch
 from scipy.io import loadmat
 from torch.utils.data import DataLoader, Dataset
+from transformers import AutoTokenizer
 
 from datawrapper.simple_tokenizer import SimpleTokenizer
 from datawrapper.undersampling import apply_fixed_mask
 from datawrapper.warpper_utils import interpolate_to_target_width, resize_512
 
 simple_tokenizer = SimpleTokenizer()
+qwen_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B", use_fast=True)
+if qwen_tokenizer.pad_token is None:
+    qwen_tokenizer.pad_token = qwen_tokenizer.eos_token
 
 prob_half: float = 0.5
 norm_eps: float = 1e-6
@@ -148,10 +152,16 @@ class DataWrapper(Dataset):
         text = _coerce_matlab_text(text)
         text_token = simple_tokenizer.tokenize(text, context_length=1536).squeeze()
 
-        # use existing text encoder for now
         instruction = loadmat(self.file_list[idx])["instruction"][0][0]
         instruction = _coerce_matlab_text(instruction)
-        instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
+        instruction_enc = qwen_tokenizer(
+            instruction,
+            padding="max_length",
+            truncation=True,
+            max_length=64,
+            return_tensors="pt",
+        )
+        instruction_token = instruction_enc["input_ids"].squeeze(0)
 
         # Extract task_name from file path
         current_file = self.file_list[idx]

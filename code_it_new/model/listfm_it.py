@@ -8,6 +8,7 @@ from torch import Tensor
 from model.listfm_backbone import LISTFMConfig, LISTFoundationModelBackbone
 from model.listfm_backbone.module import (
     Bottleneck,
+    QwenInstructionEncoder,
     SimpleTokenizer,
     TextEncoder,
     VisionTextDecoder,
@@ -28,7 +29,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
     tokenizer: SimpleTokenizer  # predefined
     bottleneck: Bottleneck  # predefined
     vision_decoder: VisionTextDecoder
-    instruction_encoder: TextEncoder
+    instruction_encoder: QwenInstructionEncoder
 
     def __init__(
         self,
@@ -49,14 +50,10 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
                 instruction_dim=listfmconfig.text_enc_tf_w,
                 input_chans=listfmconfig.img_in_chan,
             )
-            self.instruction_encoder = TextEncoder(
-                embed_dim=listfmconfig.clip_emb_dim,
-                context_length=listfmconfig.text_enc_context,
-                vocab_size=listfmconfig.text_enc_vocab_size,
-                transformer_width=listfmconfig.text_enc_tf_w,
-                transformer_heads=listfmconfig.text_enc_tf_head,
-                transformer_layers=listfmconfig.text_enc_tf_layer,
-                pretrained_model_weights=listfmconfig.text_enc_pretrained,
+            self.instruction_encoder = QwenInstructionEncoder(
+                model_name="Qwen/Qwen2.5-0.5B",
+                proj_dim=listfmconfig.text_enc_tf_w,
+                context_length=64,
             )
 
     def forward(
@@ -76,23 +73,25 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
 
         text_ctx = torch.no_grad() if not grad_encoder else nullcontext()
         text_full_feature = None
-        context_length = self.instruction_encoder.context_length
+        text_context_length = self.text_encoder.context_length
+        instruction_context_length = self.instruction_encoder.context_length
 
-        def _pad_or_truncate(tokens: Tensor) -> Tensor:
+        def _pad_or_truncate(tokens: Tensor, context_length: int) -> Tensor:
             if tokens.shape[1] > context_length:
                 return tokens[:, :context_length]
             if tokens.shape[1] < context_length:
                 return F.pad(tokens, (0, context_length - tokens.shape[1]))
             return tokens
 
-        text = _pad_or_truncate(text)
+        text = _pad_or_truncate(text, text_context_length)
         if instruction is None:
+            instruction_tokens = _pad_or_truncate(text, instruction_context_length)
             with text_ctx:
                 (
                     _text_features,
                     text_full_feature,
                 ) = self.instruction_encoder(
-                    text=text,
+                    input_ids=instruction_tokens,
                 )
             instruction = text_full_feature
         elif instruction.dtype in {
@@ -102,13 +101,13 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             torch.int64,
             torch.uint8,
         }:
-            instruction = _pad_or_truncate(instruction)
+            instruction = _pad_or_truncate(instruction, instruction_context_length)
             with text_ctx:
                 (
                     _instruction_features,
                     instruction_full_feature,
                 ) = self.instruction_encoder(
-                    text=instruction,
+                    input_ids=instruction,
                 )
             instruction = instruction_full_feature
 
