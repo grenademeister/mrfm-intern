@@ -30,6 +30,7 @@ class GeneralConfig:
 
     # Model experiment
     model_type: Literal["listfm_it", "unet"] = "listfm_it"
+    text_encoding: Literal["llm", "clip"] = "llm"
 
     # Optimizer
     optimizer: Literal["adam", "adamw"] = "adamw"
@@ -147,3 +148,8 @@ for key, value in vars(args).items():
             setattr(config, key, bool(value))
         else:
             setattr(config, key, value)
+
+if config.text_encoding == "clip":
+    config.qwen_model_path = ""
+    config.qwen_lora_path = ""
+    config.qwen_trainable = False

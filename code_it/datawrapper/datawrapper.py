@@ -186,17 +186,18 @@ class DataWrapper(Dataset):
         instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
 
         if self.qwen_tokenizer is None:
-            raise ValueError("qwen_model_path must be set for LLM instruction conditioning.")
-
-        llm_inputs = self.qwen_tokenizer(
-            instruction,
-            padding="max_length",
-            truncation=True,
-            max_length=self.qwen_max_length,
-            return_tensors="pt",
-        )
-        instruction_llm_ids = llm_inputs["input_ids"].squeeze(0).to(torch.long)
-        instruction_llm_mask = llm_inputs["attention_mask"].squeeze(0).to(torch.long)
+            instruction_llm_ids = torch.zeros(1, dtype=torch.long)
+            instruction_llm_mask = torch.zeros(1, dtype=torch.long)
+        else:
+            llm_inputs = self.qwen_tokenizer(
+                instruction,
+                padding="max_length",
+                truncation=True,
+                max_length=self.qwen_max_length,
+                return_tensors="pt",
+            )
+            instruction_llm_ids = llm_inputs["input_ids"].squeeze(0).to(torch.long)
+            instruction_llm_mask = llm_inputs["attention_mask"].squeeze(0).to(torch.long)
 
         # Extract task_name from file path
         current_file = self.file_list[idx]

@@ -339,8 +339,12 @@ def train_epoch_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
-    instruction_llm_ids: Tensor = _data[DataKey.InstructionLLMIds].to(config.device)
-    instruction_llm_mask: Tensor = _data[DataKey.InstructionLLMAttention].to(config.device)
+    if config.text_encoding == "clip":
+        instruction_llm_ids = None
+        instruction_llm_mask = None
+    else:
+        instruction_llm_ids = _data[DataKey.InstructionLLMIds].to(config.device)
+        instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
     img_cnt_minibatch = input.shape[0]
 
     flow_t = sample_flow_t(batch=img_cnt_minibatch, device=config.device)
@@ -435,8 +439,12 @@ def test_part_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
-    instruction_llm_ids: Tensor = _data[DataKey.InstructionLLMIds].to(config.device)
-    instruction_llm_mask: Tensor = _data[DataKey.InstructionLLMAttention].to(config.device)
+    if config.text_encoding == "clip":
+        instruction_llm_ids = None
+        instruction_llm_mask = None
+    else:
+        instruction_llm_ids = _data[DataKey.InstructionLLMIds].to(config.device)
+        instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
     task_names: tuple[str, ...] = _data[DataKey.TaskName]
 
     batch_cnt = input.shape[0]
