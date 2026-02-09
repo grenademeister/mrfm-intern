@@ -26,13 +26,13 @@ echo "[INFO] Current directory: $(pwd)"
 # /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat, /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple, /fast_storage/intern/data/instruction_tuning/brats_denoise_mat, /fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple, /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat, /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
-export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats2023_gli_crossmodal_mat_t1tot2, /fast_storage/intern/data/instruction_tuning/brats2023_gli_crossmodal_mat_t2toflair"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat_t1, /fast_storage/intern/data/instruction_tuning/fastmri_crossmodal_mat_t1tot2"
 
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
 
 GPU="4,5"
-TRAIN_BATCH=5
+TRAIN_BATCH=6
 export CUDA_VISIBLE_DEVICES="$GPU"
 nohup $PYTHON_PATH -m torch.distributed.run --nproc_per_node=2 train.py \
   --gpu $GPU \
@@ -42,7 +42,7 @@ nohup $PYTHON_PATH -m torch.distributed.run --nproc_per_node=2 train.py \
   --model_type "listfm_it" \
   --pretrain "/fast_storage/intern/code/share/checkpoint_3m.ckpt" \
   --from_scratch False \
-  --debugmode True \
+  --debugmode False \
   > $RUN_DIR/torchrun.out 2>&1 &
 
 # original: /fast_storage/intern/code/share/checkpoint_3m.ckpt
