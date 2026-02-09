@@ -13,6 +13,10 @@ from datawrapper.undersampling import apply_fixed_mask
 from datawrapper.warpper_utils import interpolate_to_target_width, resize_512
 
 simple_tokenizer = SimpleTokenizer()
+try:
+    from transformers import AutoTokenizer
+except ImportError:
+    AutoTokenizer = None
 
 prob_half: float = 0.5
 norm_eps: float = 1e-6
@@ -44,7 +48,9 @@ class DataKey(IntEnum):
     Label = 1
     Text = 2
     Instruction = 3
-    TaskName = 4
+    InstructionLLMIds = 4
+    InstructionLLMAttention = 5
+    TaskName = 6
 
 
 @dataclass
@@ -59,6 +65,9 @@ class LoaderConfig:
     subject_num: int
     train_percent: float
     slice_per_subject: int
+    qwen_model_path: str
+    qwen_max_length: int
+    qwen_use_fast: bool
 
 
 class DataWrapper(Dataset):
@@ -72,6 +81,10 @@ class DataWrapper(Dataset):
     train_percent: float
     slice_per_subject: int
     file_path_list: list[str]
+    qwen_model_path: str
+    qwen_max_length: int
+    qwen_use_fast: bool
+    qwen_tokenizer: "AutoTokenizer | None"
 
     def __init__(
         self,
@@ -85,6 +98,9 @@ class DataWrapper(Dataset):
         train_percent: float,
         slice_per_subject: int,
         split: str,
+        qwen_model_path: str,
+        qwen_max_length: int,
+        qwen_use_fast: bool,
     ):
         super().__init__()
 
@@ -95,9 +111,9 @@ class DataWrapper(Dataset):
             files = glob.glob(f"{_file_path}/{data_type}")
             if debug_mode:
                 if split == "train":
-                    files = files[:1280]
+                    files = files[:5000]
                 else:
-                    files = files[:64]
+                    files = files[:100]
             else:
                 if split == "train":
                     files = files[:10000]
@@ -111,6 +127,21 @@ class DataWrapper(Dataset):
 
         self.acs_num = acs_num
         self.parallel_factor = parallel_factor
+
+        self.qwen_model_path = qwen_model_path
+        self.qwen_max_length = qwen_max_length
+        self.qwen_use_fast = qwen_use_fast
+        self.qwen_tokenizer = None
+        if self.qwen_model_path:
+            if AutoTokenizer is None:
+                raise ImportError("transformers is required for Qwen tokenizer in DataWrapper")
+            self.qwen_tokenizer = AutoTokenizer.from_pretrained(
+                self.qwen_model_path,
+                use_fast=self.qwen_use_fast,
+                trust_remote_code=True,
+            )
+            if self.qwen_tokenizer.pad_token_id is None:
+                self.qwen_tokenizer.pad_token = self.qwen_tokenizer.eos_token
 
         print(f"DataWrapper initialized with {len(self.file_list)} samples.")
         print(f"Working directory: {file_path}")
@@ -153,6 +184,19 @@ class DataWrapper(Dataset):
         instruction = _coerce_matlab_text(instruction)
         instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
 
+        if self.qwen_tokenizer is None:
+            raise ValueError("qwen_model_path must be set for LLM instruction conditioning.")
+
+        llm_inputs = self.qwen_tokenizer(
+            instruction,
+            padding="max_length",
+            truncation=True,
+            max_length=self.qwen_max_length,
+            return_tensors="pt",
+        )
+        instruction_llm_ids = llm_inputs["input_ids"].squeeze(0).to(torch.long)
+        instruction_llm_mask = llm_inputs["attention_mask"].squeeze(0).to(torch.long)
+
         # Extract task_name from file path
         current_file = self.file_list[idx]
         task_name = "unknown"
@@ -166,6 +210,8 @@ class DataWrapper(Dataset):
             tgt,
             text_token,
             instruction_token,
+            instruction_llm_ids,
+            instruction_llm_mask,
             task_name,
         )
 
@@ -194,6 +240,9 @@ def get_data_wrapper_loader(
         train_percent=loader_cfg.train_percent,
         slice_per_subject=loader_cfg.slice_per_subject,
         split=split,
+        qwen_model_path=loader_cfg.qwen_model_path,
+        qwen_max_length=loader_cfg.qwen_max_length,
+        qwen_use_fast=loader_cfg.qwen_use_fast,
     )
 
     _ = dataset[0]
@@ -205,7 +254,8 @@ def get_data_wrapper_loader(
         pin_memory=True,
         persistent_workers=True,
         shuffle=loader_cfg.shuffle,
-        drop_last=True,
+        # Drop last only for training; keep all samples for val/test
+        drop_last=training_mode,
     )
 
     return (

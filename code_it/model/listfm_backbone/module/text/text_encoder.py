@@ -90,13 +90,13 @@ class TextEncoder(nn.Module):
         self,
         text: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self.token_embedding(text).type(torch.float32)
+        x = self.token_embedding(text).type(torch.float32) # (batch_size, n_ctx, transformer.width)
         x = x + self.positional_embedding.type(torch.float32)
 
-        x = self.transformer(x)
+        x = self.transformer(x) 
         x = self.ln_final(x).type(torch.float32)
-        full_feat = x
+        full_feat = x # (batch_size, n_ctx, transformer.width)
 
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
+        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection # (batch_size, transformer.width) @ (transformer.width, embed_dim) -> (batch_size, embed_dim)
         # print(x)
         return x, full_feat

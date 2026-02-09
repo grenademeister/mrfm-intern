@@ -163,6 +163,9 @@ class Trainer:
                 self.network = LISTFoundationModelIT(
                     listfmconfig,
                     use_vision_decoder=True,
+                    qwen_model_path=config.qwen_model_path,
+                    qwen_lora_path=config.qwen_lora_path,
+                    qwen_trainable=config.qwen_trainable,
                 )
                 state_dict = self._normalize_state_dict(self.resume_state["model_state_dict"], is_parallel=False)
                 self.network.load_state_dict(state_dict, strict=True)
@@ -172,6 +175,9 @@ class Trainer:
                     from_scratch=config.from_scratch,
                     use_vision_decoder=True,
                     use_vision_decoder_weights=False,
+                    qwen_model_path=config.qwen_model_path,
+                    qwen_lora_path=config.qwen_lora_path,
+                    qwen_trainable=config.qwen_trainable,
                 )
             logger.info(separator())
             logger.info("Model Config")
@@ -215,6 +221,9 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            qwen_model_path=config.qwen_model_path,
+            qwen_max_length=config.qwen_max_length,
+            qwen_use_fast=config.qwen_use_fast,
         )
 
         valid_loader_cfg = LoaderConfig(
@@ -228,6 +237,9 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            qwen_model_path=config.qwen_model_path,
+            qwen_max_length=config.qwen_max_length,
+            qwen_use_fast=config.qwen_use_fast,
         )
 
         test_loader_cfg = LoaderConfig(
@@ -241,6 +253,9 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            qwen_model_path=config.qwen_model_path,
+            qwen_max_length=config.qwen_max_length,
+            qwen_use_fast=config.qwen_use_fast,
         )
 
         self.train_loader, _, self.train_len = get_data_wrapper_loader(

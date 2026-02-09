@@ -280,26 +280,26 @@ class VisionTextDecoder(nn.Module):
             if self.instruction_dim is None:
                 raise RuntimeError("instruction_dim must be set when instruction is provided.")
 
-        output = self._reshape_encoder_features(x)
+        output = self._reshape_encoder_features(x)  # (B, C_dec0, Ew, Ew)
 
-        flow_xt = F.interpolate(flow_xt, size=(self.embed_w, self.embed_w), mode="bilinear", align_corners=False)
-        output = output + self.xt_proj(flow_xt)
+        flow_xt = F.interpolate(flow_xt, size=(self.embed_w, self.embed_w), mode="bilinear", align_corners=False)  # (B, C_in, Ew, Ew)
+        output = output + self.xt_proj(flow_xt)  # (B, C_dec0, Ew, Ew)
 
         flow_t = self._prepare_flow_t(flow_t, batch_size)
-        time_emb = self.time_mlp(flow_t)
+        time_emb = self.time_mlp(flow_t)  # (B, C_dec0)
 
         for i, layer in enumerate(self.up_sample_layers):
             downsampled_output = stack_feat.pop()
             layer_size = downsampled_output.shape[-2:]
-            output = F.interpolate(output, size=layer_size, mode="bilinear", align_corners=False)
-            flow_xt_scaled = F.interpolate(flow_xt, size=layer_size, mode="bilinear", align_corners=False)
-            downsampled_output = self.skip_proj[i](downsampled_output)
-            xt_feat = self.xt_proj_layers[i](flow_xt_scaled)
-            output = torch.cat([output, downsampled_output, xt_feat], dim=1)
-            output = layer(output)
-            output = self.time_film_layers[i](output, time_emb)
+            output = F.interpolate(output, size=layer_size, mode="bilinear", align_corners=False)  # (B, C_dec_i, S_i, S_i)
+            flow_xt_scaled = F.interpolate(flow_xt, size=layer_size, mode="bilinear", align_corners=False)  # (B, C_in, S_i, S_i)
+            downsampled_output = self.skip_proj[i](downsampled_output)  # (B, C_dec_i, S_i, S_i)
+            xt_feat = self.xt_proj_layers[i](flow_xt_scaled)  # (B, C_dec_i, S_i, S_i)
+            output = torch.cat([output, downsampled_output, xt_feat], dim=1)  # (B, 3*C_dec_i, S_i, S_i)
+            output = layer(output)  # (B, C_dec_{i+1}, S_i, S_i)
+            output = self.time_film_layers[i](output, time_emb)  # (B, C_dec_{i+1}, S_i, S_i)
             if instruction is not None:
-                output = self.instruction_adapters[i](output, instruction)
+                output = self.instruction_adapters[i](output, instruction)  # (B, C_dec_{i+1}, S_i, S_i)
 
-        output = self.final_conv(output)
+        output = self.final_conv(output)  # (B, C_out, W, W)
         return output

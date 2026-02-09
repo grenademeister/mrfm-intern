@@ -62,6 +62,15 @@ class GeneralConfig:
     grad_encoder: bool = True
     from_scratch: bool = False
 
+    # Qwen instruction encoder
+    qwen_model_path: str = "/home/intern4/.cache/huggingface/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775"
+    # qwen_lora_path: str = ""
+    qwen_lora_path: str = "/home/intern4/fm2026/mrfm-intern/code_it_llm/dapt/outputs/lora/checkpoint-606"
+
+    qwen_max_length: int = 128
+    qwen_use_fast: bool = True
+    qwen_trainable: bool = False
+
     # Rectified flow
     flow_t_min: float = 0.0
     flow_t_max: float = 1.0
