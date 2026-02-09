@@ -56,11 +56,11 @@ sleep 2
 # Start TensorBoard with external access
 nohup $TENSORBOARD_PATH \
   --logdir /home/$USER_NAME/fm2026/fm_flow/code_it/logs \
-  --port 6006 \
+  --port 6008 \
   --bind_all \
   > /dev/null 2>&1 &
 
-echo "[INFO] TensorBoard started on port 6006 (accessible externally)"
+echo "[INFO] TensorBoard started on port 6008 (accessible externally)"
 
 # sleep 20
 
