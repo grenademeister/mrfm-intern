@@ -67,6 +67,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
         grad_encoder: bool = True,
         use_bottleneck: bool = True,
         instruction: Tensor = None,
+        instruction_mask: Tensor | None = None,
         flow_xt: Tensor | None = None,
         flow_t: Tensor | None = None,
     ) -> Tensor:
@@ -148,6 +149,7 @@ class LISTFoundationModelIT(LISTFoundationModelBackbone):
             x=img_full_feature,
             stack_feat=stack_feature,
             instruction=instruction,
+            instruction_mask=instruction_mask,
             flow_xt=flow_xt,
             flow_t=flow_t,
         )

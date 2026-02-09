@@ -44,7 +44,8 @@ class DataKey(IntEnum):
     Label = 1
     Text = 2
     Instruction = 3
-    TaskName = 4
+    InstructionMask = 4
+    TaskName = 5
 
 
 @dataclass
@@ -95,9 +96,9 @@ class DataWrapper(Dataset):
             files = glob.glob(f"{_file_path}/{data_type}")
             if debug_mode:
                 if split == "train":
-                    files = files[:1280]
+                    files = files[:5000]
                 else:
-                    files = files[:64]
+                    files = files[:100]
             else:
                 if split == "train":
                     files = files[:10000]
@@ -152,6 +153,9 @@ class DataWrapper(Dataset):
         instruction = loadmat(self.file_list[idx])["instruction"][0][0]
         instruction = _coerce_matlab_text(instruction)
         instruction_token = simple_tokenizer.tokenize(instruction, context_length=64).squeeze()
+        
+        # Create mask for instruction tokens (1 for real tokens, 0 for padding)
+        instruction_mask = (instruction_token != 0).to(torch.float32)
 
         # Extract task_name from file path
         current_file = self.file_list[idx]
@@ -166,6 +170,7 @@ class DataWrapper(Dataset):
             tgt,
             text_token,
             instruction_token,
+            instruction_mask,
             task_name,
         )
 
@@ -205,7 +210,8 @@ def get_data_wrapper_loader(
         pin_memory=True,
         persistent_workers=True,
         shuffle=loader_cfg.shuffle,
-        drop_last=True,
+        # Drop last only for training; keep all samples for val/test
+        drop_last=training_mode,
     )
 
     return (

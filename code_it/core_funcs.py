@@ -133,6 +133,7 @@ def rectified_flow_sample(
     img: Tensor,
     text: Tensor,
     instruction: Tensor,
+    instruction_mask: Tensor | None = None,
     steps: int | None = None,
     t_eps: float | None = None,
 ) -> Tensor:
@@ -151,6 +152,7 @@ def rectified_flow_sample(
             use_bottleneck=config.use_bottleneck,
             grad_encoder=config.grad_encoder,
             instruction=instruction,
+            instruction_mask=instruction_mask,
             flow_xt=z,
             flow_t=t.view(img.shape[0], 1),
         )
@@ -315,6 +317,7 @@ def train_epoch_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    instruction_mask: Tensor = _data[DataKey.InstructionMask].to(config.device)
     img_cnt_minibatch = input.shape[0]
 
     flow_t = sample_flow_t(batch=img_cnt_minibatch, device=config.device)
@@ -324,6 +327,7 @@ def train_epoch_listfm_vision_pretraining(
         img=input,
         text=text,
         instruction=instruction,
+        instruction_mask=instruction_mask,
         use_bottleneck=config.use_bottleneck,
         grad_encoder=config.grad_encoder,
         flow_xt=flow_xt,
@@ -403,6 +407,7 @@ def test_part_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    instruction_mask: Tensor = _data[DataKey.InstructionMask].to(config.device)
     task_names: tuple[str, ...] = _data[DataKey.TaskName]
 
     batch_cnt = input.shape[0]
@@ -412,6 +417,7 @@ def test_part_listfm_vision_pretraining(
             img=input,
             text=text,
             instruction=instruction,
+            instruction_mask=instruction_mask,
         )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)

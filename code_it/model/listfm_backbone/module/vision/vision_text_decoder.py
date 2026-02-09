@@ -91,6 +91,114 @@ class InstructionAdapter(nn.Module):
         gate = gate.view(instruction.shape[0], x.shape[1], 1, 1)
         return x + self.up(self.act(self.down(x))) * gate
 
+class InstructionCrossAttention(nn.Module):
+    def __init__(
+        self,
+        chans: int,
+        instruction_dim: int,
+        attn_ratio: float = 0.25,
+        min_attn_dim: int = 32,
+        num_heads: int = 4,
+    ) -> None:
+        super().__init__()
+        attn_dim = max(min_attn_dim, int(chans * attn_ratio))
+        if attn_dim % num_heads != 0:
+            attn_dim = ((attn_dim + num_heads - 1) // num_heads) * num_heads
+
+        self.norm_x = nn.LayerNorm(chans)
+        self.norm_inst = nn.LayerNorm(instruction_dim)
+
+        self.q_proj = nn.Conv2d(chans, attn_dim, kernel_size=1, padding=0)
+        self.k_proj = nn.Linear(instruction_dim, attn_dim, bias=False)
+        self.v_proj = nn.Linear(instruction_dim, attn_dim, bias=False)
+        
+        self.attn = nn.MultiheadAttention(attn_dim, num_heads, batch_first=True)
+        self.out_proj = nn.Conv2d(attn_dim, chans, kernel_size=1, padding=0)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        instruction: torch.Tensor,
+        instruction_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if instruction is None:
+            return x
+        b, c, h, w = x.shape
+        # prenorm
+        x_norm = x.permute(0, 2, 3, 1)
+        x_norm = self.norm_x(x_norm).permute(0, 3, 1, 2)
+        inst_norm = self.norm_inst(instruction)
+
+        q = self.q_proj(x_norm).flatten(2).transpose(1, 2) # (B, HW, attn_dim)
+        k = self.k_proj(inst_norm)                         # (B, N, attn_dim)
+        v = self.v_proj(inst_norm)                         # (B, N, attn_dim)
+
+        key_padding_mask = None
+        if instruction_mask is not None:
+            if instruction_mask.dim() == 1:
+                instruction_mask = instruction_mask.unsqueeze(0)
+            
+            key_padding_mask = ~instruction_mask.to(torch.bool)
+            
+            # optional
+            mask_val = instruction_mask.to(k.dtype).unsqueeze(-1)
+            k = k * mask_val
+            v = v * mask_val
+
+        attn_out, _ = self.attn(q, k, v, need_weights=False, key_padding_mask=key_padding_mask)
+        
+        attn_out = attn_out.transpose(1, 2).reshape(b, -1, h, w)
+        return x + self.out_proj(attn_out)
+
+# class InstructionCrossAttention(nn.Module):
+    # def __init__(
+    #     self,
+    #     chans: int,
+    #     instruction_dim: int,
+    #     attn_ratio: float = 0.25,
+    #     min_attn_dim: int = 32,
+    #     num_heads: int = 4,
+    # ) -> None:
+    #     super().__init__()
+    #     attn_dim = max(min_attn_dim, int(chans * attn_ratio))
+    #     if attn_dim % num_heads != 0:
+    #         attn_dim = ((attn_dim + num_heads - 1) // num_heads) * num_heads
+    #     self.q_proj = nn.Conv2d(chans, attn_dim, kernel_size=1, padding=0)
+    #     self.k_proj = nn.Linear(instruction_dim, attn_dim, bias=False)
+    #     self.v_proj = nn.Linear(instruction_dim, attn_dim, bias=False)
+    #     self.attn = nn.MultiheadAttention(attn_dim, num_heads, batch_first=True)
+    #     self.q_norm = nn.LayerNorm(attn_dim)
+    #     self.k_norm = nn.LayerNorm(attn_dim)
+    #     self.v_norm = nn.LayerNorm(attn_dim)
+    #     self.out_proj = nn.Conv2d(attn_dim, chans, kernel_size=1, padding=0)
+
+    # def forward(
+    #     self,
+    #     x: torch.Tensor,
+    #     instruction: torch.Tensor,
+    #     instruction_mask: torch.Tensor | None = None,
+    # ) -> torch.Tensor:
+    #     if instruction is None:
+    #         return x
+    #     q = self.q_proj(x)
+    #     b, c, h, w = q.shape
+    #     q = q.flatten(2).transpose(1, 2)
+    #     k = self.k_proj(instruction)
+    #     v = self.v_proj(instruction)
+    #     q = self.q_norm(q)
+    #     k = self.k_norm(k)
+    #     v = self.v_norm(v)
+    #     key_padding_mask = None
+    #     if instruction_mask is not None:
+    #         if instruction_mask.dim() == 1:
+    #             instruction_mask = instruction_mask.unsqueeze(0)
+    #         if instruction_mask.shape[:2] != k.shape[:2]:
+    #             raise ValueError("instruction_mask must be shaped (B, N) to match instruction.")
+    #         key_padding_mask = ~instruction_mask.to(torch.bool)
+    #     attn_out, _ = self.attn(q, k, v, need_weights=False, key_padding_mask=key_padding_mask)
+    #     attn_out = attn_out.transpose(1, 2).reshape(b, c, h, w)
+    #     return x + self.out_proj(attn_out)
+
 
 class VisionTextDecoder(nn.Module):
     out_chans: int
@@ -128,14 +236,6 @@ class VisionTextDecoder(nn.Module):
         self.embed_w = image_width // (2 ** (num_pool_layers))
         self.input_chans = input_chans if input_chans is not None else out_chans
         self.instruction_dim = instruction_dim
-
-        self.instruction_pool = None
-        if instruction_dim is not None:
-            self.instruction_pool = nn.Sequential(
-                nn.Linear(instruction_dim, instruction_dim),
-                nn.SiLU(inplace=True),
-                nn.Linear(instruction_dim, 1),
-            )
 
         # Up-sampling layers
         self.up_sample_layers = create_up_sample_layers_with_xt(
@@ -210,7 +310,7 @@ class VisionTextDecoder(nn.Module):
         self.instruction_adapters = nn.ModuleList()
         if instruction_dim is not None:
             for out_ch in self.stage_out_chans:
-                self.instruction_adapters.append(InstructionAdapter(out_ch, instruction_dim))
+                self.instruction_adapters.append(InstructionCrossAttention(out_ch, instruction_dim))
 
         # Final convolution layers
         self.final_conv = nn.Sequential(
@@ -230,11 +330,7 @@ class VisionTextDecoder(nn.Module):
             raise ValueError("instruction must be a 3D (B, N, D) tensor.")
         if instruction.dim() != 3:
             raise ValueError("instruction must be a 3D (B, N, D) tensor.")
-        if self.instruction_pool is None:
-            raise RuntimeError("instruction_dim must be set when instruction is provided.")
-        weights = self.instruction_pool(instruction).squeeze(-1)
-        weights = torch.softmax(weights, dim=1)
-        return torch.sum(instruction * weights.unsqueeze(-1), dim=1)
+        return instruction
 
     def _prepare_flow_t(
         self,
@@ -263,6 +359,7 @@ class VisionTextDecoder(nn.Module):
         x: torch.Tensor,
         stack_feat: list[torch.Tensor],
         instruction: torch.Tensor = None,
+        instruction_mask: torch.Tensor | None = None,
         flow_xt: torch.Tensor | None = None,
         flow_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
@@ -280,26 +377,26 @@ class VisionTextDecoder(nn.Module):
             if self.instruction_dim is None:
                 raise RuntimeError("instruction_dim must be set when instruction is provided.")
 
-        output = self._reshape_encoder_features(x)
+        output = self._reshape_encoder_features(x)  # (B, C_dec0, Ew, Ew)
 
-        flow_xt = F.interpolate(flow_xt, size=(self.embed_w, self.embed_w), mode="bilinear", align_corners=False)
-        output = output + self.xt_proj(flow_xt)
+        flow_xt = F.interpolate(flow_xt, size=(self.embed_w, self.embed_w), mode="bilinear", align_corners=False)  # (B, C_in, Ew, Ew)
+        output = output + self.xt_proj(flow_xt)  # (B, C_dec0, Ew, Ew)
 
         flow_t = self._prepare_flow_t(flow_t, batch_size)
-        time_emb = self.time_mlp(flow_t)
+        time_emb = self.time_mlp(flow_t)  # (B, C_dec0)
 
         for i, layer in enumerate(self.up_sample_layers):
             downsampled_output = stack_feat.pop()
             layer_size = downsampled_output.shape[-2:]
-            output = F.interpolate(output, size=layer_size, mode="bilinear", align_corners=False)
-            flow_xt_scaled = F.interpolate(flow_xt, size=layer_size, mode="bilinear", align_corners=False)
-            downsampled_output = self.skip_proj[i](downsampled_output)
-            xt_feat = self.xt_proj_layers[i](flow_xt_scaled)
-            output = torch.cat([output, downsampled_output, xt_feat], dim=1)
-            output = layer(output)
-            output = self.time_film_layers[i](output, time_emb)
+            output = F.interpolate(output, size=layer_size, mode="bilinear", align_corners=False)  # (B, C_dec_i, S_i, S_i)
+            flow_xt_scaled = F.interpolate(flow_xt, size=layer_size, mode="bilinear", align_corners=False)  # (B, C_in, S_i, S_i)
+            downsampled_output = self.skip_proj[i](downsampled_output)  # (B, C_dec_i, S_i, S_i)
+            xt_feat = self.xt_proj_layers[i](flow_xt_scaled)  # (B, C_dec_i, S_i, S_i)
+            output = torch.cat([output, downsampled_output, xt_feat], dim=1)  # (B, 3*C_dec_i, S_i, S_i)
+            output = layer(output)  # (B, C_dec_{i+1}, S_i, S_i)
+            output = self.time_film_layers[i](output, time_emb)  # (B, C_dec_{i+1}, S_i, S_i)
             if instruction is not None:
-                output = self.instruction_adapters[i](output, instruction)
+                output = self.instruction_adapters[i](output, instruction, instruction_mask)  # (B, C_dec_{i+1}, S_i, S_i)
 
-        output = self.final_conv(output)
+        output = self.final_conv(output)  # (B, C_out, W, W)
         return output

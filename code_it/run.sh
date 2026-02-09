@@ -12,28 +12,35 @@ TENSORBOARD_PATH=/home/$USER_NAME/.conda/envs/$CONDA_ENV_NAME/bin/tensorboard
 echo "[INFO] Current directory: $(pwd)"
 
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_denoise_mat"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"
-export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_t2"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/oasis3_identity_mat"
 
 # use all
-# export DATA_ROOT=["/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat",
-# "/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple",
-# "/fast_storage/intern/data/instruction_tuning/brats_denoise_mat",
-# "/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"]
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat \
+# /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple \
+# /fast_storage/intern/data/instruction_tuning/brats_denoise_mat \
+# /fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple \
+# /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat, /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple, /fast_storage/intern/data/instruction_tuning/brats_denoise_mat, /fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple, /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat, /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats2023_gli_crossmodal_mat_t1tot2, /fast_storage/intern/data/instruction_tuning/brats2023_gli_crossmodal_mat_t2toflair"
 
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
 
-GPU="4,5,6,7"
-TRAIN_BATCH=28
+GPU="6,7"
+TRAIN_BATCH=16
 nohup $PYTHON_PATH train.py \
   --gpu $GPU \
   --train_batch $TRAIN_BATCH \
+  --tag "code_it_ca" \
   --model_type "listfm_it" \
-  --pretrained "/fast_storage/intern/code/share/checkpoint_3m.ckpt" \
+  --pretrain "/fast_storage/intern/code/share/checkpoint_3m.ckpt" \
   --from_scratch False \
+  --debugmode True \
   > /dev/null 2>&1 &
 
 # original: /fast_storage/intern/code/share/checkpoint_3m.ckpt
