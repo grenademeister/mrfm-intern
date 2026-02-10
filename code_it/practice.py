@@ -33,7 +33,7 @@ tokenizer = AutoTokenizer.from_pretrained(
     local_files_only=True
 )
 
-prompt = "Do you know what's the difference between T1 and T2 image?"
+prompt = "T1 goes to T2 MRI modality, and t2 goes to flair. then does t1 goes to flair?"
 messages = [
     {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
     {"role": "user", "content": prompt}

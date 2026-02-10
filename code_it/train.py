@@ -66,7 +66,6 @@ class Trainer:
             world_size_env = int(os.environ.get("WORLD_SIZE", "1"))
             if world_size_env > 1:
                 self.is_distributed = True
-                # 이미 격리되었으므로 여기서 local_rank는 항상 0이 됩니다.
                 self.local_rank = 0
                 self.global_rank = int(os.environ.get("RANK", "0"))
                 self.world_size = world_size_env

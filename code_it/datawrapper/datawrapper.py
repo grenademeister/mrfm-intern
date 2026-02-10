@@ -113,9 +113,9 @@ class DataWrapper(Dataset):
             files = glob.glob(f"{_file_path}/{data_type}")
             if debug_mode:
                 if split == "train":
-                    files = files[:5000]
+                    files = files[:50]
                 else:
-                    files = files[:100]
+                    files = files[:10]
             else:
                 if split == "train":
                     files = files[:10000]
@@ -269,7 +269,7 @@ def get_data_wrapper_loader(
         batch_size=loader_cfg.batch,
         num_workers=loader_cfg.num_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=training_mode,
         shuffle=loader_cfg.shuffle if sampler is None else False,
         sampler=sampler,
         # Drop last only for training; keep all samples for val/test
