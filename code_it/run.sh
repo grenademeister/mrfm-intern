@@ -34,20 +34,24 @@ export TRAIN_ITER=1
 GPU="4,5"
 TRAIN_BATCH=6
 export CUDA_VISIBLE_DEVICES="$GPU"
-nohup $PYTHON_PATH -m torch.distributed.run --nproc_per_node=2 train.py \
+nohup $PYTHON_PATH -m torch.distributed.run \
+  --nproc_per_node=2 \
+  --master_port=29502 \
+  train.py \
   --gpu $GPU \
   --train_batch $TRAIN_BATCH \
-  --valid_batch 32 \
-  --tag "code_it_llm_ca" \
+  --valid_batch 16 \
   --model_type "listfm_it" \
   --pretrain "/fast_storage/intern/code/share/checkpoint_3m.ckpt" \
   --from_scratch False \
   --debugmode False \
-  > $RUN_DIR/torchrun.out 2>&1 &
-
-# original: /fast_storage/intern/code/share/checkpoint_3m.ckpt
+  --text_encoding "clip" \
+  --num_workers 2 \
+  > $RUN_DIR/torchrun_clip.out 2>&1 &
 
 echo "[INFO] Training started on GPU: $GPU with batch size: $TRAIN_BATCH"
+
+# original: /fast_storage/intern/code/share/checkpoint_3m.ckpt
 
 # Kill existing TensorBoard processes
 pkill -f "tensorboard --logdir /home/$USER_NAME/fm2026/fm_flow/code_it/logs" || true

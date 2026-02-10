@@ -87,8 +87,6 @@ class GeneralConfig:
     train_percent: float = 1.0
     slice_per_subject: int = 100
 
-    tag: str = ""
-
     # Resume
     resume: bool = False
     resume_path: str = ""
