@@ -395,6 +395,8 @@ def train_epoch(
     logging_cnt: int = 1
     img_cnt: int = 0
     total_batches = len(train_loader)
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    log_interval = max(1, int(train_len / (config.logging_density * max(1, world_size))))
     for batch_idx, _data in enumerate(train_loader):
         zero_optimizers(optim_list=optim_list)
         img_cnt_minibatch, loss_mean = train_epoch_listfm_vision_pretraining(
@@ -409,7 +411,7 @@ def train_epoch(
             step = epoch * total_batches + batch_idx
             tb_writer.add_scalar("train/loss_batch", loss_mean, step)
         img_cnt += img_cnt_minibatch
-        if log_enabled and img_cnt > (train_len / config.logging_density * logging_cnt):
+        if log_enabled and img_cnt > (log_interval * logging_cnt):
             log_summary(
                 init_time=config.init_time,
                 state=train_state,
@@ -446,6 +448,7 @@ def test_part_listfm_vision_pretraining(
     text: Tensor = _data[DataKey.Text].to(config.device)
     label: Tensor = _data[DataKey.Label].to(config.device)
     instruction: Tensor = _data[DataKey.Instruction].to(config.device)
+    instruction_raw: tuple[str, ...] = _data[DataKey.InstructionRaw]
     if config.text_encoding == "clip":
         instruction_llm_ids = None
         instruction_llm_mask = _data[DataKey.InstructionLLMAttention].to(config.device)
