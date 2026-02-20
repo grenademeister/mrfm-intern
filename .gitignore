@@ -5,14 +5,6 @@
 !uv.lock
 !code_it/
 !code_it/**
-!code_it_new/
-!code_it_new/**
-!code_it_ca/
-!code_it_ca/**
-!code_it_llm/
-!code_it_llm/**
-!code_it_llm_ca/
-!code_it_llm_ca/**
 !data_prep/
 !data_prep/**
 
