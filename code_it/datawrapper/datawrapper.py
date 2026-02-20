@@ -67,9 +67,10 @@ class LoaderConfig:
     subject_num: int
     train_percent: float
     slice_per_subject: int
-    qwen_model_path: str
-    qwen_max_length: int
-    qwen_use_fast: bool
+    max_per_task: list[int] | None = None
+    qwen_model_path: str = ""
+    qwen_max_length: int = 0
+    qwen_use_fast: bool = True
 
 
 class DataWrapper(Dataset):
@@ -99,6 +100,7 @@ class DataWrapper(Dataset):
         subject_num: int,
         train_percent: float,
         slice_per_subject: int,
+        max_per_task: list[int] | None,
         split: str,
         qwen_model_path: str,
         qwen_max_length: int,
@@ -109,18 +111,30 @@ class DataWrapper(Dataset):
         total_list: list[str] = []
         self.file_path_list = file_path
         
-        for _file_path in file_path:
+        def _resolve_limit(default_limit: int, task_idx: int) -> int:
+            if max_per_task is None:
+                return default_limit
+            if len(max_per_task) == 1:
+                return max_per_task[0]
+            if task_idx < len(max_per_task):
+                return max_per_task[task_idx]
+            return default_limit
+
+        for idx, _file_path in enumerate(file_path):
             files = glob.glob(f"{_file_path}/{data_type}")
             if debug_mode:
+                # In debug mode, allow per-task limits only for training.
                 if split == "train":
-                    files = files[:50]
+                    limit = _resolve_limit(100, idx)
                 else:
-                    files = files[:10]
+                    limit = 100
+                files = files[:limit]
             else:
                 if split == "train":
-                    files = files[:10000]
+                    limit = _resolve_limit(20000, idx)
                 else:
-                    files = files[:200]
+                    limit = _resolve_limit(100, idx)
+                files = files[:limit]
             
             total_list += files
 
@@ -171,13 +185,29 @@ class DataWrapper(Dataset):
         img = resize_512(img)
         tgt = resize_512(interpolate_to_target_width(tgt, target_size=512))
 
+        # Extract task_name from file path early for conditional normalization
+        current_file = self.file_list[idx]
+        task_name = "unknown"
+        for base_path in self.file_path_list:
+            if current_file.startswith(base_path):
+                task_name = base_path.rstrip("/").split("/")[-2]
+                break
+
         img = _normalize_tensor(img)
-        tgt = _normalize_tensor(tgt)
+        if task_name != "segmentation":
+            tgt = _normalize_tensor(tgt)
 
         input = img.clone()
         # input, _, _ = apply_fixed_mask(input, acs_num=self.acs_num, parallel_factor=self.parallel_factor)
 
-        text = loadmat(self.file_list[idx])["text"][0][0]
+        text = loadmat(self.file_list[idx]).get("text")
+        if isinstance(text, np.ndarray):
+            if text.size == 0:
+                text = ""
+            else:
+                text = text.flat[0]
+        if text is None:
+            text = ""
         text = _coerce_matlab_text(text)
         text_token = simple_tokenizer.tokenize(text, context_length=1536).squeeze()
 
@@ -200,14 +230,6 @@ class DataWrapper(Dataset):
             )
             instruction_llm_ids = llm_inputs["input_ids"].squeeze(0).to(torch.long)
             instruction_llm_mask = llm_inputs["attention_mask"].squeeze(0).to(torch.long)
-
-        # Extract task_name from file path
-        current_file = self.file_list[idx]
-        task_name = "unknown"
-        for base_path in self.file_path_list:
-            if current_file.startswith(base_path):
-                task_name = base_path.rstrip('/').split('/')[-2]
-                break
 
         return (
             input,
@@ -247,6 +269,7 @@ def get_data_wrapper_loader(
         subject_num=loader_cfg.subject_num,
         train_percent=loader_cfg.train_percent,
         slice_per_subject=loader_cfg.slice_per_subject,
+        max_per_task=loader_cfg.max_per_task,
         split=split,
         qwen_model_path=loader_cfg.qwen_model_path,
         qwen_max_length=loader_cfg.qwen_max_length,
@@ -269,7 +292,7 @@ def get_data_wrapper_loader(
         batch_size=loader_cfg.batch,
         num_workers=loader_cfg.num_workers,
         pin_memory=True,
-        persistent_workers=training_mode,
+        persistent_workers=training_mode and loader_cfg.num_workers > 0,
         shuffle=loader_cfg.shuffle if sampler is None else False,
         sampler=sampler,
         # Drop last only for training; keep all samples for val/test

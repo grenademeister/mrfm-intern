@@ -51,16 +51,19 @@ class GeneralConfig:
     logging_density: int = 4
     valid_interval: int = 4
     valid_tol: int = 0
-    num_workers: int = 32
+    num_workers: int = 8
     save_val: bool = True
     parallel: bool = True
     device: torch.device | None = None
-    save_max_idx: int = 100
+    save_max_idx: int = 50
 
     # Pretrained
     pretrained: str = "/fast_storage/intern/code/share/checkpoint_3m.ckpt"
     use_bottleneck: bool = True
+    use_vision_decoder: bool = True
+    use_vision_decoder_weights: bool = False
     grad_encoder: bool = True
+    freeze_bottleneck: bool = False
     from_scratch: bool = False
 
     # Qwen instruction encoder
@@ -86,6 +89,9 @@ class GeneralConfig:
     subject_num: int = 3
     train_percent: float = 1.0
     slice_per_subject: int = 100
+    train_max_per_task: str = ""
+    valid_max_per_task: str = ""
+    test_max_per_task: str = ""
 
     # Resume
     resume: bool = False

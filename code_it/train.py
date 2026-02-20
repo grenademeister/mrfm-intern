@@ -1,13 +1,10 @@
 import os
 import sys
 
-# [중요] LOCAL_RANK를 확인하여 import torch 전에 GPU를 물리적으로 격리합니다.
-# 이렇게 하면 각 프로세스는 자기에게 할당된 GPU 1개만 '0번'으로 인식하게 됩니다.
 if "LOCAL_RANK" in os.environ and "CUDA_VISIBLE_DEVICES" in os.environ:
     local_rank = int(os.environ["LOCAL_RANK"])
     visible_devices = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
     if len(visible_devices) > local_rank:
-        # 현재 프로세스가 사용할 물리적 GPU 번호 하나만 남깁니다.
         os.environ["CUDA_VISIBLE_DEVICES"] = visible_devices[local_rank]
 
 import time
@@ -220,12 +217,16 @@ class Trainer:
                 self.network = load_from_ckpt(
                     ckpt_path=Path(config.pretrained),
                     from_scratch=config.from_scratch,
-                    use_vision_decoder=True,
-                    use_vision_decoder_weights=False,
+                    use_vision_decoder=config.use_vision_decoder,
+                    use_vision_decoder_weights=config.use_vision_decoder_weights,
                     qwen_model_path=config.qwen_model_path,
                     qwen_lora_path=config.qwen_lora_path,
                     qwen_trainable=config.qwen_trainable,
                 )
+            if config.freeze_bottleneck:
+                for param in self.network.bottleneck.parameters():
+                    param.requires_grad = False
+                logger.info("Bottleneck parameters frozen.")
             logger.info(separator())
             logger.info("Model Config")
             config_dict = asdict(self.network.listfmconfig)
@@ -257,6 +258,18 @@ class Trainer:
             raise KeyError("model type not matched")
 
         logger.info(separator())
+        def _parse_max_per_task(value: str) -> list[int] | None:
+            if not value:
+                return None
+            parts = [p.strip() for p in value.split(",") if p.strip()]
+            if not parts:
+                return None
+            return [int(p) for p in parts]
+
+        train_max_per_task = _parse_max_per_task(config.train_max_per_task)
+        valid_max_per_task = _parse_max_per_task(config.valid_max_per_task)
+        test_max_per_task = _parse_max_per_task(config.test_max_per_task)
+
         train_loader_cfg = LoaderConfig(
             batch=config.train_batch,
             num_workers=config.num_workers,
@@ -268,6 +281,7 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            max_per_task=train_max_per_task,
             qwen_model_path=config.qwen_model_path,
             qwen_max_length=config.qwen_max_length,
             qwen_use_fast=config.qwen_use_fast,
@@ -284,6 +298,7 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            max_per_task=valid_max_per_task,
             qwen_model_path=config.qwen_model_path,
             qwen_max_length=config.qwen_max_length,
             qwen_use_fast=config.qwen_use_fast,
@@ -300,6 +315,7 @@ class Trainer:
             subject_num=config.subject_num,
             train_percent=config.train_percent,
             slice_per_subject=config.slice_per_subject,
+            max_per_task=test_max_per_task,
             qwen_model_path=config.qwen_model_path,
             qwen_max_length=config.qwen_max_length,
             qwen_use_fast=config.qwen_use_fast,
@@ -321,9 +337,9 @@ class Trainer:
             training_mode=False,
             loader_cfg=valid_loader_cfg,
             split="valid",
-            distributed=False,
-            rank=0,
-            world_size=1,
+            distributed=self.is_distributed,
+            rank=self.global_rank,
+            world_size=self.world_size,
         )
         logger.info(f"Valid dataset length : {valid_len}")
 
@@ -332,9 +348,9 @@ class Trainer:
             training_mode=False,
             loader_cfg=test_loader_cfg,
             split="test",
-            distributed=False,
-            rank=0,
-            world_size=1,
+            distributed=self.is_distributed,
+            rank=self.global_rank,
+            world_size=self.world_size,
         )
         logger.info(f"Test dataset length : {test_len}")
 

@@ -21,6 +21,7 @@ class QwenInstructionEncoder(nn.Module):
             dtype=dtype,
             trust_remote_code=True,
             local_files_only=True,
+            device_map="auto"
         )
         if lora_path:
             try:

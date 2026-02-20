@@ -10,6 +10,7 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 from scipy.io import savemat
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 from torch import Tensor
 from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader
@@ -469,16 +470,66 @@ def test_part_listfm_vision_pretraining(
         )
 
     loss = torch.mean(loss_func(output, label), dim=(1, 2, 3), keepdim=True)
-    psnr = calculate_psnr(output, label)
-    ssim = calculate_ssim(output, label)
+
+    # Convert to numpy once for all metrics
+    output_np = output.detach().cpu().numpy()
+    label_np = label.detach().cpu().numpy()
+    psnr_list: list[float] = []
+    ssim_list: list[float] = []
+    dice_list: list[float] = []
+    # Crop region for metric computation (matches visualization)
+    x1, x2, y1, y2 = 20, -20, 20, -20
+    for i in range(batch_cnt):
+        out_i = output_np[i]
+        lab_i = label_np[i]
+        task_name = task_names[i]
+        is_seg = "segmentation" in task_name
+        if is_seg:
+            if out_i.ndim == 3 and out_i.shape[0] == 1:
+                out_i = out_i[0]
+                lab_i = lab_i[0]
+            pred_bin = out_i > 0.5
+            lab_bin = lab_i > 0.5
+            intersection = (pred_bin & lab_bin).sum()
+            denom = pred_bin.sum() + lab_bin.sum()
+            dice = (2.0 * intersection + 1e-7) / (denom + 1e-7)
+            dice_list.append(float(dice))
+            continue
+        channel_axis = None
+        if out_i.ndim == 3 and out_i.shape[0] == 1:
+            out_i = out_i[0]
+            lab_i = lab_i[0]
+        elif out_i.ndim == 3:
+            channel_axis = 0
+        # Apply crop on spatial dims for non-seg metrics
+        if out_i.ndim == 2:
+            out_i = out_i[x1:x2, y1:y2]
+            lab_i = lab_i[x1:x2, y1:y2]
+        elif out_i.ndim == 3 and channel_axis == 0:
+            out_i = out_i[:, x1:x2, y1:y2]
+            lab_i = lab_i[:, x1:x2, y1:y2]
+        data_range = float(lab_i.max() - lab_i.min())
+        psnr_list.append(peak_signal_noise_ratio(out_i, lab_i, data_range=data_range))
+        ssim_list.append(
+            structural_similarity(out_i, lab_i, data_range=data_range, channel_axis=channel_axis)
+        )
+    psnr = torch.tensor(psnr_list) if psnr_list else None
+    ssim = torch.tensor(ssim_list) if ssim_list else None
+    dice = torch.tensor(dice_list) if dice_list else None
 
     # Add to overall metrics
     test_state.add("loss", loss)
-    test_state.add("psnr", psnr)
-    test_state.add("ssim", ssim)
+    if psnr is not None:
+        test_state.add("psnr", psnr)
+    if ssim is not None:
+        test_state.add("ssim", ssim)
+    if dice is not None:
+        test_state.add("dice", dice)
 
     # Add to task-specific metrics (per sample in batch)
     if task_states is not None:
+        seg_idx = 0
+        nonseg_idx = 0
         for i in range(batch_cnt):
             task_name = task_names[i]
             if task_name not in task_states:
@@ -487,8 +538,20 @@ def test_part_listfm_vision_pretraining(
             
             # Add metrics for individual sample
             task_states[task_name].add("loss", loss[i:i+1])
-            task_states[task_name].add("psnr", psnr[i:i+1])
-            task_states[task_name].add("ssim", ssim[i:i+1])
+            is_seg = "segmentation" in task_name
+            if is_seg:
+                if dice is not None:
+                    task_states[task_name].add("dice", dice[seg_idx:seg_idx + 1])
+                    seg_idx += 1
+            else:
+                if psnr is not None:
+                    task_states[task_name].add("psnr", psnr[nonseg_idx:nonseg_idx + 1])
+                if ssim is not None:
+                    task_states[task_name].add("ssim", ssim[nonseg_idx:nonseg_idx + 1])
+                nonseg_idx += 1
+    
+    # Explicitly delete tensors to free memory
+    del loss, psnr, ssim, dice, output_np, label_np, psnr_list, ssim_list, dice_list
 
     if save_val:
         save_result_to_mat(
@@ -501,11 +564,15 @@ def test_part_listfm_vision_pretraining(
                 "text": text,
                 "instruction": instruction,
                 "instruction_raw": instruction_raw,
+                "task_name": task_names,
             },
             img_cnt=img_cnt,
             rank=rank,
             world_size=world_size,
         )
+        # Clear GPU cache after saving
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     return batch_cnt
 
@@ -579,7 +646,8 @@ def test_part(
 
         task_global_stats: dict[tuple[str, str], tuple[float, float]] = {}
         for task_name in merged_task_names:
-            for key in ("loss", "psnr", "ssim"):
+            keys = ("loss", "dice") if "segmentation" in task_name else ("loss", "psnr", "ssim")
+            for key in keys:
                 values = task_states.get(task_name, MetricController()).state_dict.get(key, [])
                 local_sum = float(sum(values)) if values else 0.0
                 local_sumsq = float(sum(v * v for v in values)) if values else 0.0
@@ -614,7 +682,8 @@ def test_part(
                 logger.info("Task-specific Metrics:")
                 for task_name in merged_task_names:
                     logger.info(f"--- {task_name} ---")
-                    for key in ("loss", "psnr", "ssim"):
+                    keys = ("loss", "dice") if "segmentation" in task_name else ("loss", "psnr", "ssim")
+                    for key in keys:
                         mean, std = task_global_stats[(task_name, key)]
                         logger.info(f"{spend_time} | {key}: {mean:0.3e} + {std:0.3e}")
                         if tb_writer is not None and tb_prefix is not None and epoch is not None:
@@ -623,6 +692,8 @@ def test_part(
                 logger.info("=" * 80)
 
         primary_metric = global_stats.get("psnr", (0.0, 0.0))[0]
+        if primary_metric == 0.0 and "dice" in global_stats:
+            primary_metric = global_stats.get("dice", (0.0, 0.0))[0]
         return float(primary_metric)
 
     # Non-distributed logging
@@ -654,5 +725,15 @@ def test_part(
                 )
             logger.info("=" * 80)
 
-    primary_metric = test_state.mean("psnr")
+    if "psnr" in test_state.state_dict:
+        primary_metric = test_state.mean("psnr")
+    else:
+        primary_metric = test_state.mean("dice")
+    
+    # Clean up memory after validation/test
+    test_state.reset()
+    task_states.clear()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
     return primary_metric

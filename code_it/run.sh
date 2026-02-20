@@ -11,43 +11,35 @@ PYTHON_PATH=/home/$USER_NAME/.conda/envs/$CONDA_ENV_NAME/bin/python
 TENSORBOARD_PATH=/home/$USER_NAME/.conda/envs/$CONDA_ENV_NAME/bin/tensorboard
 echo "[INFO] Current directory: $(pwd)"
 
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_denoise_mat"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_t2"
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/oasis3_identity_mat"
-
-# use all
-# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat \
-# /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple \
-# /fast_storage/intern/data/instruction_tuning/brats_denoise_mat \
-# /fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple \
-# /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat, /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple, /fast_storage/intern/data/instruction_tuning/brats_denoise_mat, /fast_storage/intern/data/instruction_tuning/brats_segmentation_mat_simple, /fast_storage/intern/data/instruction_tuning/oasis3_longitudinal_mat_new"
 # export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat, /fast_storage/intern/data/instruction_tuning/brats_crossmodal_mat_simple"
-export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat_t1, /fast_storage/intern/data/instruction_tuning/fastmri_crossmodal_mat_t1tot2"
+# export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/fastmri_acceleration_mat_t1, /fast_storage/intern/data/instruction_tuning/fastmri_crossmodal_mat_t1tot2"
+export DATA_ROOTS="/fast_storage/intern/data/instruction_tuning/multi_task/acceleration, /fast_storage/intern/data/instruction_tuning/multi_task/crossmodal, /fast_storage/intern/data/instruction_tuning/multi_task/denoising, /fast_storage/intern/data/instruction_tuning/multi_task/segmentation"
 
 export RUN_DIR=$LOG_DATE
 export TRAIN_ITER=1
 
-GPU="4,5"
-TRAIN_BATCH=6
+GPU="3,4,5"
+TRAIN_BATCH=12
 export CUDA_VISIBLE_DEVICES="$GPU"
 nohup $PYTHON_PATH -m torch.distributed.run \
-  --nproc_per_node=2 \
+  --nproc_per_node=3 \
   --master_port=29502 \
   train.py \
   --gpu $GPU \
   --train_batch $TRAIN_BATCH \
-  --valid_batch 16 \
+  --valid_batch 32 \
   --model_type "listfm_it" \
   --pretrain "/fast_storage/intern/code/share/checkpoint_3m.ckpt" \
+  --grad_encoder True \
+  --use_bottleneck False \
+  --use_vision_decoder_weights False \
   --from_scratch False \
   --debugmode False \
-  --text_encoding "clip" \
-  --num_workers 2 \
-  > $RUN_DIR/torchrun_clip.out 2>&1 &
+  --text_encoding "llm" \
+  --num_workers 3 \
+  --train_max_per_task "10000,30000,10000,30000" \
+  > $RUN_DIR/torchrun_llm.out 2>&1 &
 
 echo "[INFO] Training started on GPU: $GPU with batch size: $TRAIN_BATCH"
 
@@ -60,11 +52,11 @@ sleep 2
 # Start TensorBoard with external access
 nohup $TENSORBOARD_PATH \
   --logdir /home/$USER_NAME/fm2026/fm_flow/code_it/logs \
-  --port 6008 \
+  --port 6009 \
   --bind_all \
   > /dev/null 2>&1 &
 
-echo "[INFO] TensorBoard started on port 6008 (accessible externally)"
+echo "[INFO] TensorBoard started on port 6009 (accessible externally)"
 
 # sleep 20
 

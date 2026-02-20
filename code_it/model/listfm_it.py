@@ -241,6 +241,8 @@ def load_from_ckpt(
             "vision_encoder",
             "text_encoder",
             "bottleneck",
+            "instruction_encoder",
+            "qwen_instruction_encoder",
         ]:
             model_state_dict[new_key] = longitudinal_checkpoint_data["model_state_dict"][key]
 

@@ -93,7 +93,7 @@ class LISTFMConfig:
     bottleneck_head: int  # 8
     tokenizer_bpe: Path  # PosixPath('bpe_simple_vocab_16e6.txt.gz')
     clip_emb_dim: int  # 512
-    vision_dec_feat: int = 16
+    vision_dec_feat: int = 32
 
     def to_dict(self) -> dict:
         d = asdict(self)
